@@ -226,14 +226,32 @@ function nightlyBatch() {
   const masters  = getSheet(SHEET.MASTER).getDataRange().getValues().slice(1)
   const zErrors  = []
 
+  // グレード時給表（新規シート作成時に使用）
+  const rateSheet   = getSheet(SHEET.RATE)
+  const rateData    = rateSheet.getDataRange().getValues()
+  const rateHeaders = rateData[0]
+  const templateSheet = ss.getSheetByName('テンプレート')
+
   masters.forEach(master => {
     const staffId  = master[1]
     const name     = master[2]
     const grade    = master[3]
     const isSocial = (grade === '社員')
 
-    const staffSheet = ss.getSheetByName(name)
-    if (!staffSheet) return
+    let staffSheet = ss.getSheetByName(name)
+
+    // ── 講師マスタにいるがシートがない → テンプレートから自動作成 ──
+    if (!staffSheet) {
+      if (!templateSheet) {
+        Logger.log(`テンプレートなし。シート作成スキップ: ${name}`)
+        return
+      }
+      staffSheet = templateSheet.copyTo(ss)
+      staffSheet.setName(name)
+      const dayCount = Math.round((new Date(end) - new Date(start)) / 86400000) + 1
+      fillStaffSheet(staffSheet, name, grade, new Date(start), dayCount, rateData, rateHeaders)
+      Logger.log(`新規講師シート自動作成: ${name}（${start}〜${end}）`)
+    }
 
     const sheetRows = staffSheet.getDataRange().getValues()
 
