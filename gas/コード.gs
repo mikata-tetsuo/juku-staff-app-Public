@@ -274,9 +274,16 @@ function nightlyBatch() {
     }
   })
 
-  // ── 21日は月次バックアップ ──
+  // ── 毎日：日次スナップショット ──
+  dailySnapshot(ss)
+
+  // ── 21日：給与履歴記録 → 月次バックアップ → 講師シートリセット ──
   if (today.getDate() === 21) {
-    monthlyBackup(ss, masters, end)
+    const prevEnd   = new Date(today.getFullYear(), today.getMonth(), 20)
+    const prevStart = new Date(today.getFullYear(), today.getMonth() - 1, 21)
+    recordPayrollHistory(ss, masters, prevStart, prevEnd)
+    monthlyBackup(ss, prevEnd)
+    autoMonthlyUpdate(ss, today)
   }
 
   // ── Z異常メール通知 ──
@@ -294,87 +301,143 @@ function nightlyBatch() {
 }
 
 // ============================================================
-//  月次バックアップ（毎月21日）
-//  ① 新規スプレッドシートをバックアップフォルダに作成
-//  ② Excelに変換して本社にメール送信
+//  バックアップフォルダ取得ユーティリティ
+//  バックアップ/monthly/ または バックアップ/daily/ を返す
 // ============================================================
 
-function monthlyBackup(ss, masters, endDate) {
-  const dt      = endDate instanceof Date ? endDate : new Date(endDate)
-  const year    = dt.getFullYear()
-  const month   = dt.getMonth() + 1
-  const label   = `${year}年${month}月分`
-  const fileName = `アルバイト明細_${label}`
-
-  // バックアップフォルダを取得または作成
-  const parentFolder = DriveApp.getFileById(ss.getId()).getParents().next()
-  let backupFolder
-  const folders = parentFolder.getFoldersByName('バックアップ')
-  if (folders.hasNext()) {
-    backupFolder = folders.next()
-  } else {
-    backupFolder = parentFolder.createFolder('バックアップ')
+function getBackupSubFolder(ss, type) {
+  const parent  = DriveApp.getFileById(ss.getId()).getParents().next()
+  const getBF   = (folder, name) => {
+    const it = folder.getFoldersByName(name)
+    return it.hasNext() ? it.next() : folder.createFolder(name)
   }
+  const root = getBF(parent, 'バックアップ')
+  return getBF(root, type)  // 'monthly' または 'daily'
+}
 
-  // 既存バックアップチェック
-  const existing = backupFolder.getFilesByName(fileName)
-  if (existing.hasNext()) {
-    Logger.log(`バックアップ済み: ${fileName}`)
+// ============================================================
+//  日次スナップショット（毎日 nightlyBatch で自動実行）
+//  バックアップ/daily/ に保存、31日より古いものは自動削除
+// ============================================================
+
+function dailySnapshot(ss) {
+  const today    = new Date()
+  const dateStr  = Utilities.formatDate(today, 'Asia/Tokyo', 'yyyy-MM-dd')
+  const fileName = `スナップショット_${dateStr}`
+  const folder   = getBackupSubFolder(ss, 'daily')
+
+  // 当日分が既にあればスキップ
+  if (folder.getFilesByName(fileName).hasNext()) {
+    Logger.log(`スナップショット済み: ${fileName}`)
     return
   }
 
-  // 現在のスプレッドシートをコピー
-  const original   = DriveApp.getFileById(ss.getId())
-  const backupFile = original.makeCopy(fileName, backupFolder)
-  Logger.log(`バックアップ作成: ${fileName}`)
+  // コピー作成
+  DriveApp.getFileById(ss.getId()).makeCopy(fileName, folder)
+  Logger.log(`スナップショット作成: ${fileName}`)
+
+  // 31日より古いファイルをゴミ箱へ
+  const cutoff = new Date(today.getTime() - 31 * 86400000)
+  const files  = folder.getFiles()
+  let deleted  = 0
+  while (files.hasNext()) {
+    const f = files.next()
+    if (f.getDateCreated() < cutoff) { f.setTrashed(true); deleted++ }
+  }
+  if (deleted > 0) Logger.log(`古いスナップショット削除: ${deleted}件`)
+}
+
+// ============================================================
+//  月次バックアップ（毎月21日）
+//  ① バックアップ/monthly/ にスプレッドシートのコピー
+//  ② Excelに変換して本社にメール送信
+// ============================================================
+
+function monthlyBackup(ss, endDate) {
+  const dt       = endDate instanceof Date ? endDate : new Date(endDate)
+  const year     = dt.getFullYear()
+  const month    = dt.getMonth() + 1
+  const label    = `${year}年${month}月分`
+  const fileName = `アルバイト明細_${label}`
+  const folder   = getBackupSubFolder(ss, 'monthly')
+
+  // 既存バックアップチェック
+  if (folder.getFilesByName(fileName).hasNext()) {
+    Logger.log(`月次バックアップ済み: ${fileName}`)
+    return
+  }
+
+  // コピー作成
+  const backupFile = DriveApp.getFileById(ss.getId()).makeCopy(fileName, folder)
+  Logger.log(`月次バックアップ作成: ${fileName}`)
 
   // Excelに変換してメール送信
   const url      = `https://docs.google.com/spreadsheets/d/${backupFile.getId()}/export?format=xlsx`
   const token    = ScriptApp.getOAuthToken()
-  const response = UrlFetchApp.fetch(url, {
-    headers: { Authorization: `Bearer ${token}` }
-  })
+  const response = UrlFetchApp.fetch(url, { headers: { Authorization: `Bearer ${token}` } })
   const xlsxBlob = response.getBlob().setName(`${fileName}.xlsx`)
 
-  // 本社メールアドレスを管理者シートから取得
-  const adminSheet = getSheet(SHEET.ADMIN)
-  const adminRows  = adminSheet.getDataRange().getValues().slice(1)
-  const honsha     = adminRows.filter(r => r[2] === true || r[2] === '✓' || r[2] === '本社')
+  const adminRows = getSheet(SHEET.ADMIN).getDataRange().getValues().slice(1)
+  adminRows
+    .filter(r => r[2] === true || r[2] === '✓' || r[2] === '本社')
+    .forEach(row => {
+      if (!row[1]) return
+      GmailApp.sendEmail(
+        row[1],
+        `【${label}】アルバイト明細`,
+        `${label}のアルバイト明細をお送りします。\n\nご確認をよろしくお願いいたします。`,
+        { attachments: [xlsxBlob] }
+      )
+      Logger.log(`Excel送信: ${row[1]}`)
+    })
+}
 
-  honsha.forEach(row => {
-    const email = row[1]
-    if (!email) return
-    GmailApp.sendEmail(
-      email,
-      `【${label}】アルバイト明細`,
-      `${label}のアルバイト明細をお送りします。\n\nご確認をよろしくお願いいたします。`,
-      { attachments: [xlsxBlob] }
-    )
-    Logger.log(`Excel送信: ${email}`)
+// ============================================================
+//  給与履歴記録（21日バッチで月次バックアップ前に自動実行）
+//  各講師シートの T36・U36・W36・X36・V36 を給与履歴シートに追記
+// ============================================================
+
+function recordPayrollHistory(ss, masters, periodStart, periodEnd) {
+  const sheetName = '給与履歴'
+  let histSheet   = ss.getSheetByName(sheetName)
+  if (!histSheet) {
+    histSheet = ss.insertSheet(sheetName)
+    histSheet.appendRow(['期間開始', '期間終了', 'スタッフID', '氏名', 'グレード',
+                         '授業料', '交通費', 'チーフ手当', '合計支給額', '出勤数', '記録日時'])
+    histSheet.getRange(1, 1, 1, 11)
+      .setBackground('#1565C0').setFontColor('white').setFontWeight('bold')
+  }
+
+  const startStr = Utilities.formatDate(periodStart, 'Asia/Tokyo', 'yyyy/M/d')
+  const endStr   = Utilities.formatDate(periodEnd,   'Asia/Tokyo', 'yyyy/M/d')
+
+  masters.forEach(master => {
+    const staffId = master[1]
+    const name    = master[2]
+    const grade   = master[3]
+    if (!name) return
+
+    const staffSheet = ss.getSheetByName(name)
+    if (!staffSheet) return
+
+    // 36行目から集計値を読み取る（T=20, U=21, W=23, X=24, V=22）
+    const t36 = staffSheet.getRange(CALC_ROW, 20).getValue() || 0  // 授業料合計
+    const u36 = staffSheet.getRange(CALC_ROW, 21).getValue() || 0  // 交通費合計
+    const w36 = staffSheet.getRange(CALC_ROW, 23).getValue() || 0  // チーフ手当
+    const x36 = staffSheet.getRange(CALC_ROW, 24).getValue() || 0  // 合計支給額
+    const v36 = staffSheet.getRange(CALC_ROW, 22).getValue() || 0  // 出勤数
+
+    histSheet.appendRow([startStr, endStr, staffId, name, grade,
+                         t36, u36, w36, x36, v36, new Date()])
+    Logger.log(`給与履歴記録: ${name} ${startStr}〜${endStr} 合計${x36}円`)
   })
 }
 
 // ============================================================
-//  月次更新（バックアップ確認後、手動実行）
-//  ① 打刻ログ・勤務記録ログをクリア
-//  ② 各講師シートをテンプレートから再生成（または更新）
+//  月次更新を自動実行（21日 nightlyBatch から呼び出し）
 // ============================================================
 
-function monthlyUpdate() {
-  const ss    = SpreadsheetApp.getActiveSpreadsheet()
-  const today = new Date()
-
-  // ── テンプレートシートの確認 ──
-  const templateSheet = ss.getSheetByName('テンプレート')
-  if (!templateSheet) {
-    SpreadsheetApp.getUi().alert(
-      '「テンプレート」シートが見つかりません！\n' +
-      'シート名を「テンプレート」にして再実行してください。'
-    )
-    return
-  }
-
-  // ── 新しい期間を計算（実行日≧21日なら「今月21日〜来月20日」）──
+function autoMonthlyUpdate(ss, today) {
   let periodStart, periodEnd
   if (today.getDate() >= 21) {
     periodStart = new Date(today.getFullYear(), today.getMonth(), 21)
@@ -383,49 +446,48 @@ function monthlyUpdate() {
     periodStart = new Date(today.getFullYear(), today.getMonth() - 1, 21)
     periodEnd   = new Date(today.getFullYear(), today.getMonth(), 20)
   }
+  const dayCount = Math.round((periodEnd - periodStart) / 86400000) + 1
 
-  // 期間の日数を計算（月によって28〜31日）
-  const dayCount   = Math.round((periodEnd - periodStart) / 86400000) + 1
-  const startLabel = Utilities.formatDate(periodStart, 'Asia/Tokyo', 'M/d')
-  const endLabel   = Utilities.formatDate(periodEnd,   'Asia/Tokyo', 'M/d')
+  const templateSheet = ss.getSheetByName('テンプレート')
+  if (!templateSheet) {
+    Logger.log('テンプレートシートが見つかりません。月次更新スキップ。')
+    sendAdminMail('【月次更新エラー】', 'テンプレートシートが見つからないため月次更新をスキップしました。手動で実行してください。')
+    return
+  }
 
-  // ── 打刻ログ・勤務記録ログはクリアしない（履歴として蓄積）──
-
-  // ── グレード時給表を読み込み ──
   const rateSheet   = getSheet(SHEET.RATE)
   const rateData    = rateSheet.getDataRange().getValues()
-  // 1行目: ['※1コマ80分', '研修', 'B1', 'B2', ..., 'A12']
   const rateHeaders = rateData[0]
-
-  // ── 4. 講師マスタから全スタッフを取得してシートをリセット ──
-  const masterRows = getSheet(SHEET.MASTER).getDataRange().getValues().slice(1)
-  let updated = 0
+  const masterRows  = getSheet(SHEET.MASTER).getDataRange().getValues().slice(1)
 
   masterRows.forEach(master => {
     const name  = master[2]
     const grade = master[3]
-
     if (!name) return
 
     let staffSheet = ss.getSheetByName(name)
     if (!staffSheet) {
-      // テンプレートをコピーして新規作成
       staffSheet = templateSheet.copyTo(ss)
       staffSheet.setName(name)
-      Logger.log(`テンプレートからシート作成: ${name}`)
     }
-
     fillStaffSheet(staffSheet, name, grade, periodStart, dayCount, rateData, rateHeaders)
-    updated++
   })
 
-  SpreadsheetApp.getUi().alert(
-    `月次更新が完了しました！\n\n` +
-    `期間: ${startLabel} 〜 ${endLabel}（${dayCount}日間）\n` +
-    `更新シート: ${updated}件\n\n` +
-    `※ 打刻ログ・勤務記録ログは履歴として保持しています`
-  )
-  Logger.log(`月次更新完了: ${startLabel}〜${endLabel} / ${updated}件`)
+  const startLabel = Utilities.formatDate(periodStart, 'Asia/Tokyo', 'M/d')
+  const endLabel   = Utilities.formatDate(periodEnd,   'Asia/Tokyo', 'M/d')
+  Logger.log(`月次更新完了（自動）: ${startLabel}〜${endLabel}`)
+}
+
+// ============================================================
+//  月次更新（手動実行用・緊急時やテスト用）
+//  通常は21日の nightlyBatch が自動実行する
+// ============================================================
+
+function monthlyUpdate() {
+  const ss    = SpreadsheetApp.getActiveSpreadsheet()
+  const today = new Date()
+  autoMonthlyUpdate(ss, today)
+  SpreadsheetApp.getUi().alert('月次更新が完了しました！\n（ログは履歴として保持）')
 }
 
 // ============================================================
