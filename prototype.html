@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>講師勤務管理（プロトタイプ）</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { colors: { 'line-green': '#06C755' } } }
+    }
+  </script>
+  <style>
+    body { -webkit-tap-highlight-color: transparent; }
+    .screen { display: none; }
+    .screen.active { display: flex; flex-direction: column; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { animation: spin 1s linear infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+    .pulse { animation: pulse 2s cubic-bezier(0.4,0,0.6,1) infinite; }
+    @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .pop-in { animation: popIn 0.3s ease-out forwards; }
+  </style>
+</head>
+<body class="h-screen bg-gray-50 flex flex-col">
+
+  <!-- ローディング画面 -->
+  <div id="screen-loading" class="screen active h-full items-center justify-center gap-4">
+    <div class="w-12 h-12 border-4 border-[#06C755] border-t-transparent rounded-full spinner"></div>
+    <p class="text-gray-500 text-sm">LINEアカウントを確認中...</p>
+  </div>
+
+  <!-- 入室画面 -->
+  <div id="screen-clock" class="screen h-full overflow-hidden">
+    <!-- ヘッダー -->
+    <div class="bg-[#06C755] text-white px-4 pt-10 pb-6 flex-shrink-0">
+      <div class="flex items-center gap-3 mb-3">
+        <div id="avatar" class="w-11 h-11 rounded-full bg-white/30 flex items-center justify-center text-xl font-bold">田</div>
+        <div>
+          <p class="text-sm opacity-75">こんにちは</p>
+          <p class="font-bold text-lg leading-tight" id="staff-name">田中 花子 先生</p>
+        </div>
+      </div>
+      <p class="text-sm opacity-75" id="header-date"></p>
+    </div>
+
+    <!-- コンテンツ -->
+    <div class="flex-1 overflow-y-auto px-4 py-5 space-y-4">
+      <!-- 時計 -->
+      <div class="bg-white rounded-2xl shadow-sm p-5 text-center">
+        <p id="clock-display" class="text-5xl font-mono font-bold text-gray-800 tracking-wider"></p>
+        <p class="text-xs text-gray-400 mt-1">現在時刻</p>
+      </div>
+
+      <!-- 通勤手段 -->
+      <div id="commute-area" class="bg-white rounded-2xl shadow-sm p-4">
+        <p class="text-sm font-semibold text-gray-600 mb-2">通勤手段</p>
+        <div id="commute-options" class="flex gap-2 flex-wrap"></div>
+      </div>
+
+      <!-- 入室ボタン -->
+      <div id="btn-area">
+        <button id="btn-clock-in"
+          class="w-full py-5 bg-[#06C755] text-white text-xl font-bold rounded-2xl shadow-md active:scale-95 transition-transform">
+          🟢 入室する
+        </button>
+      </div>
+
+      <!-- 担当科目 -->
+      <div class="bg-white rounded-2xl shadow-sm p-4">
+        <p class="text-sm font-semibold text-gray-600 mb-2">担当科目</p>
+        <div class="flex flex-wrap gap-2">
+          <span class="bg-green-100 text-green-700 text-sm font-medium px-3 py-1 rounded-full">数学</span>
+          <span class="bg-green-100 text-green-700 text-sm font-medium px-3 py-1 rounded-full">英語</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 入室OK！オーバーレイ -->
+  <div id="overlay-clockin" class="hidden fixed inset-0 bg-[#06C755] flex flex-col items-center justify-center gap-4 z-50">
+    <div class="text-7xl pop-in">✅</div>
+    <p class="text-white text-2xl font-bold pop-in">入室しました！</p>
+    <p class="text-white/80 text-base pop-in" id="overlay-time"></p>
+  </div>
+
+  <!-- 勤務記録画面 -->
+  <div id="screen-report" class="screen h-full overflow-hidden">
+    <div class="bg-[#06C755] text-white px-4 py-4 flex-shrink-0">
+      <h2 class="text-lg font-bold">勤務記録</h2>
+      <p class="text-sm opacity-90" id="report-header-info"></p>
+    </div>
+
+    <div class="flex-1 overflow-y-auto px-4 py-4 space-y-3" id="lessons-scroll">
+      <div id="lessons-container" class="space-y-3"></div>
+
+      <button id="btn-add-lesson"
+        class="w-full py-2 border-2 border-dashed border-[#06C755] text-[#06C755] font-semibold rounded-xl text-sm">
+        ＋ 授業を追加
+      </button>
+    </div>
+
+    <div class="px-4 py-4 border-t border-gray-100 bg-white flex-shrink-0 space-y-3">
+      <div id="z-check-msg" class="hidden"></div>
+      <button id="btn-submit-report"
+        class="w-full py-4 bg-[#06C755] text-white font-bold rounded-xl text-lg">
+        勤務記録を送信する
+      </button>
+    </div>
+  </div>
+
+  <!-- 完了・退室画面 -->
+  <div id="screen-done" class="screen h-full items-center justify-center px-6">
+    <!-- 退室前 -->
+    <div id="done-before-out" class="flex flex-col items-center gap-5 w-full">
+      <div class="text-5xl">✅</div>
+      <p class="text-xl font-bold text-gray-800">勤務記録を確認しました</p>
+      <p class="text-gray-500 text-sm text-center">授業お疲れ様でした！<br/>退室する前に下のボタンを押してください。</p>
+      <p id="min-exit-msg" class="text-sm font-semibold text-[#06C755]"></p>
+      <div id="early-exit-err" class="hidden w-full rounded-xl p-3 text-sm bg-red-50 border border-red-300 text-red-700 text-center"></div>
+      <button id="btn-clock-out"
+        class="w-full py-5 bg-[#06C755] text-white text-xl font-bold rounded-2xl shadow-md active:scale-95 transition-transform">
+        🟢 退室する
+      </button>
+    </div>
+    <!-- 退室後 -->
+    <div id="done-after-out" class="hidden flex flex-col items-center gap-5 w-full text-center">
+      <div class="text-6xl">🎉</div>
+      <p class="text-xl font-bold text-gray-800">退室しました</p>
+      <p class="text-gray-500 text-sm">お疲れ様でした！<br/>アプリを閉じてください。</p>
+    </div>
+  </div>
+
+  <script>
+    // ─── GAS 設定 ─────────────────────────────────────────────────────────────
+    const GAS_URL  = 'https://script.google.com/macros/s/AKfycbyl5Keb3GlLljXGccWixmDN3um8p6aThsuTdwxQ-lGEtfwfHYWMcSghtvuFxBABkD8S/exec'
+    const LIFF_ID  = '2009964329-UsimhYJ2'
+    const DEV_MODE = false  // true にするとモック動作（ブラウザ直接テスト用）
+
+    async function gasGet(params) {
+      const query = new URLSearchParams(params).toString()
+      const res   = await fetch(`${GAS_URL}?${query}`)
+      return res.json()
+    }
+
+    async function gasPost(body) {
+      await fetch(GAS_URL, {
+        method : 'POST',
+        mode   : 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body   : JSON.stringify(body),
+      })
+      return { success: true }
+    }
+
+    // ─── State ───────────────────────────────────────────────────────────────
+    const state = {
+      clockInTime   : null,
+      clockInDate   : null,
+      minExitDate   : null,
+      pendingReport : null,
+      commute       : null,   // 選択中の通勤手段 { label, allowance }
+      staff         : { staffId: 'S001', name: '田中 花子', commutes: [] },
+    }
+
+    // ─── 通勤手段ボタン描画 ───────────────────────────────────────────────────
+    function renderCommuteOptions(commutes) {
+      const el = document.getElementById('commute-options')
+      if (!commutes || commutes.length === 0) {
+        el.innerHTML = '<p class="text-sm text-gray-400">通勤手段未設定</p>'
+        return
+      }
+      el.innerHTML = commutes.map((c, i) => `
+        <button onclick="selectCommute(${i})"
+          id="commute-btn-${i}"
+          class="px-4 py-2 rounded-full text-sm font-semibold border-2 transition-all
+            ${i === 0 ? 'bg-[#06C755] text-white border-[#06C755]' : 'bg-white text-gray-600 border-gray-300'}">
+          ${c.label}（${c.allowance > 0 ? c.allowance + '円' : '手当なし'}）
+        </button>`).join('')
+      // デフォルト通勤1を選択
+      state.commute = commutes[0]
+    }
+
+    function selectCommute(idx) {
+      const commutes = state.staff.commutes
+      state.commute = commutes[idx]
+      commutes.forEach((_, i) => {
+        const btn = document.getElementById(`commute-btn-${i}`)
+        if (i === idx) {
+          btn.className = btn.className.replace('bg-white text-gray-600 border-gray-300', 'bg-[#06C755] text-white border-[#06C755]')
+        } else {
+          btn.className = btn.className.replace('bg-[#06C755] text-white border-[#06C755]', 'bg-white text-gray-600 border-gray-300')
+        }
+      })
+    }
+
+    // ─── Screens ─────────────────────────────────────────────────────────────
+    function showScreen(id) {
+      document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'))
+      document.getElementById('screen-' + id).classList.add('active')
+    }
+
+    // ─── 時計 ────────────────────────────────────────────────────────────────
+    function updateClock() {
+      const now  = new Date()
+      const time = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      const date = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`
+      document.getElementById('clock-display').textContent = time
+      document.getElementById('header-date').textContent  = date
+    }
+
+    // ─── 入室 ────────────────────────────────────────────────────────────────
+    async function clockIn() {
+      const btn = document.getElementById('btn-clock-in')
+      btn.textContent = '処理中...'
+      btn.disabled = true
+
+      // 位置情報取得（任意）
+      let location = null
+      try {
+        location = await new Promise(res => {
+          navigator.geolocation.getCurrentPosition(
+            p => res({ lat: p.coords.latitude, lng: p.coords.longitude }),
+            () => res(null), { timeout: 4000 }
+          )
+        })
+      } catch {}
+
+      const now     = new Date()
+      const timeStr = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+
+      if (DEV_MODE) {
+        await mockDelay(500)
+        console.log('[mock] 入室:', { time: now.toISOString(), location })
+      } else {
+        await gasPost({
+          action          : 'attendance',
+          staffId         : state.staff.staffId,
+          name            : state.staff.name,
+          type            : 'in',
+          timestamp       : now.toISOString(),
+          location,
+          commuteLabel    : state.commute?.label    || '',
+          commuteAllowance: state.commute?.allowance || 0,
+        })
+      }
+
+      state.clockInTime = timeStr
+      state.clockInDate = now
+
+      // 入室OKオーバーレイを表示 → 1.5秒後に勤務記録画面へ
+      const overlay = document.getElementById('overlay-clockin')
+      document.getElementById('overlay-time').textContent = timeStr + ' 入室'
+      overlay.classList.remove('hidden')
+      setTimeout(() => {
+        overlay.classList.add('hidden')
+        showReportScreen()
+      }, 1500)
+    }
+
+    document.getElementById('btn-clock-in').onclick = clockIn
+
+    // ─── 退室 ────────────────────────────────────────────────────────────────
+    async function clockOut() {
+      const now    = new Date()
+      const errEl  = document.getElementById('early-exit-err')
+
+      // ── 最低退室時刻チェック ──
+      if (state.minExitDate && now < state.minExitDate) {
+        const minStr = state.minExitDate.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+        errEl.textContent = `⚠️ ${minStr} 以降に退室してください`
+        errEl.classList.remove('hidden')
+        return
+      }
+      errEl.classList.add('hidden')
+
+      const btn = document.getElementById('btn-clock-out')
+      btn.textContent = '処理中...'
+      btn.disabled = true
+
+      const fmtTime = d => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+
+      if (DEV_MODE) {
+        await mockDelay(500)
+        console.log('[mock] 退室:', { time: now.toISOString() })
+        if (state.pendingReport) console.log('[mock] 勤務記録送信:', state.pendingReport)
+      } else {
+        // 退室打刻と勤務記録を同時送信
+        await Promise.all([
+          gasPost({
+            action    : 'attendance',
+            staffId   : state.staff.staffId,
+            name      : state.staff.name,
+            type      : 'out',
+            timestamp : now.toISOString(),
+            location  : null,
+          }),
+          state.pendingReport ? gasPost({
+            ...state.pendingReport,
+            clockOutTime: fmtTime(now),
+          }) : Promise.resolve(),
+        ])
+      }
+
+      // 退室後の表示に切り替え
+      document.getElementById('done-before-out').classList.add('hidden')
+      document.getElementById('done-after-out').classList.remove('hidden')
+    }
+
+    document.getElementById('btn-clock-out').onclick = clockOut
+
+    // ─── 勤務記録フォーム ─────────────────────────────────────────────────────
+    const GRADES    = ['小学生', '中学生', '高校生']
+    const KOMA_OPTS = Array.from({length: 8}, (_, i) => (i + 1) * 0.25)
+    const HOUR_OPTS = Array.from({length: 32}, (_, i) => Math.round((i + 1) * 25) / 100)
+
+    const TYPE_LABELS = {
+      'MM1:1'    : 'MM 1:1',
+      'MM1:2'    : 'MM 1:2',
+      'jiritu'   : '自立',
+      'isshosho' : '一斉少人数(1〜8名)',
+      'isshoota' : '一斉多人数(9名以上)',
+      'hoshu'    : '補習 or 事務',
+    }
+
+    let lessonCount = 0
+
+    function sel(opts, placeholder, cls = '') {
+      return `<select class="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#06C755] ${cls}">
+        <option value="">${placeholder}</option>
+        ${opts.map(o => `<option value="${o}" ${o==='中学生'?'selected':''}>${o}</option>`).join('')}
+      </select>`
+    }
+
+    function hoursSelect(cls, def = '') {
+      return `<select class="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#06C755] ${cls}">
+        <option value="">時間</option>
+        ${HOUR_OPTS.map(h => `<option value="${h}" ${h==def?'selected':''}>${h}h</option>`).join('')}
+      </select>`
+    }
+
+    function komaSelect(cls) {
+      return `<select class="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#06C755] ${cls}">
+        <option value="">コマ数</option>
+        ${KOMA_OPTS.map(k => `<option value="${k}" ${k===1?'selected':''}>${k}コマ（${Math.round(k*80)}分）</option>`).join('')}
+      </select>`
+    }
+
+    function detailFields(type) {
+      const inp = `border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#06C755] w-full`
+      if (type === 'MM1:1') return `
+        <div class="grid grid-cols-2 gap-2">
+          ${sel(GRADES,'学年を選択','grade-sel')}
+          ${komaSelect('koma-sel')}
+        </div>
+        <input class="${inp} name-inp" placeholder="生徒名" />`
+
+      if (type === 'MM1:2') return `
+        <p class="text-xs text-gray-400">生徒1</p>
+        <div class="grid grid-cols-2 gap-2">
+          ${sel(GRADES,'学年を選択','grade-sel grade-sel1')}
+          <input class="${inp.replace('w-full','')} name-inp name-inp1" placeholder="生徒名" />
+        </div>
+        <p class="text-xs text-gray-400">生徒2</p>
+        <div class="grid grid-cols-2 gap-2">
+          ${sel(GRADES,'学年を選択','grade-sel grade-sel2')}
+          <input class="${inp.replace('w-full','')} name-inp name-inp2" placeholder="生徒名" />
+        </div>
+        ${komaSelect('koma-sel w-full')}`
+
+      if (type === 'jiritu') return `
+        <div class="grid grid-cols-2 gap-2">
+          ${sel(GRADES,'学年を選択','grade-sel')}
+          ${hoursSelect('hour-sel', 2)}
+        </div>`
+
+      if (type === 'isshosho' || type === 'isshoota') return `
+        <div class="grid grid-cols-2 gap-2">
+          ${sel(GRADES,'学年を選択','grade-sel')}
+          ${hoursSelect('hour-sel', 2)}
+        </div>
+        <input class="${inp} class-inp" placeholder="クラス名（例: 中2A数学）" />`
+
+      if (type === 'hoshu') return `
+        ${hoursSelect('hour-sel w-full', 0.25)}`
+
+      return ''
+    }
+
+    function lessonCard(idx) {
+      const typeOpts = Object.entries(TYPE_LABELS).map(([v, l]) =>
+        `<option value="${v}">${l}</option>`).join('')
+      return `
+        <div id="lesson-${idx}" class="bg-white rounded-xl p-4 shadow-sm border border-gray-100 space-y-3">
+          <div class="flex justify-between items-center">
+            <span class="text-sm font-bold text-gray-700">授業 ${idx + 1}</span>
+            ${idx > 0 ? `<button onclick="removeLesson(${idx})" class="text-red-400 text-xs font-medium">削除</button>` : ''}
+          </div>
+          <select onchange="onTypeChange(${idx},this.value)"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#06C755] type-sel">
+            <option value="">授業の種類を選択</option>
+            ${typeOpts}
+          </select>
+          <div id="lesson-detail-${idx}" class="space-y-2"></div>
+        </div>`
+    }
+
+    function onTypeChange(idx, type) {
+      document.getElementById(`lesson-detail-${idx}`).innerHTML = type ? detailFields(type) : ''
+    }
+
+    function removeLesson(idx) {
+      document.getElementById(`lesson-${idx}`).remove()
+    }
+
+    function showReportScreen() {
+      const now     = new Date()
+      const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
+      document.getElementById('report-header-info').textContent = `${dateStr}　${state.staff.name}　${state.clockInTime} 入室`
+      lessonCount = 1
+      document.getElementById('lessons-container').innerHTML = lessonCard(0)
+      document.getElementById('z-check-msg').classList.add('hidden')
+      const btn = document.getElementById('btn-submit-report')
+      btn.textContent = '勤務記録を送信する'
+      btn.disabled = false
+      showScreen('report')
+    }
+
+    document.getElementById('btn-add-lesson').onclick = function () {
+      const idx = lessonCount++
+      document.getElementById('lessons-container').insertAdjacentHTML('beforeend', lessonCard(idx))
+    }
+
+    // ─── 授業データを収集 ─────────────────────────────────────────────────────
+    function collectLessons() {
+      const result = []
+      document.querySelectorAll('[id^="lesson-"]').forEach(card => {
+        if (!card.id.match(/^lesson-\d+$/)) return
+        const type = card.querySelector('.type-sel')?.value
+        if (!type) return
+        const typeLabel = TYPE_LABELS[type] || type
+        if (type === 'MM1:1' || type === 'MM1:2') {
+          const grade  = card.querySelector('.grade-sel')?.value || ''
+          const target = card.querySelector('.name-inp')?.value || ''
+          const amount = parseFloat(card.querySelector('.koma-sel')?.value || 0)
+          result.push({ typeLabel, grade, target, amount, unit: 'コマ' })
+        } else if (type === 'isshosho' || type === 'isshoota') {
+          const grade  = card.querySelector('.grade-sel')?.value || ''
+          const target = card.querySelector('.class-inp')?.value || ''
+          const amount = parseFloat(card.querySelector('.hour-sel')?.value || 0)
+          result.push({ typeLabel, grade, target, amount, unit: 'h' })
+        } else {
+          const grade  = card.querySelector('.grade-sel')?.value || ''
+          const amount = parseFloat(card.querySelector('.hour-sel')?.value || 0)
+          result.push({ typeLabel, grade, target: '', amount, unit: 'h' })
+        }
+      })
+      return result
+    }
+
+    // ─── V（勤務記録合計）を計算 ──────────────────────────────────────────────
+    function calcV() {
+      let total = 0
+      document.querySelectorAll('[id^="lesson-"]').forEach(card => {
+        if (!card.id.match(/^lesson-\d+$/)) return
+        const type = card.querySelector('.type-sel')?.value
+        if (!type) return
+        if (type === 'MM1:1' || type === 'MM1:2') {
+          const koma = parseFloat(card.querySelector('.koma-sel')?.value || 0)
+          total += koma * (80 / 60)
+        } else {
+          const h = parseFloat(card.querySelector('.hour-sel')?.value || 0)
+          total += h
+        }
+      })
+      return total
+    }
+
+    // ─── Zチェックと送信 ─────────────────────────────────────────────────────
+    document.getElementById('btn-submit-report').onclick = async function () {
+      const types = [...document.querySelectorAll('.type-sel')].map(s => s.value)
+      if (types.some(t => !t)) { alert('授業の種類をすべて選択してください'); return }
+
+      const V = calcV()
+      if (V === 0) { alert('授業の内容を入力してください'); return }
+
+      const now     = new Date()
+      const clockIn = state.clockInDate || now
+      const Y       = (now - clockIn) / 3600000
+      const Z       = Y - V
+
+      const minExitDate = new Date(clockIn.getTime() + V * 3600000)
+      const minExitStr  = minExitDate.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+
+      const msgEl = document.getElementById('z-check-msg')
+
+      if (Z < -0.25) {
+        msgEl.className = 'rounded-xl p-4 text-sm bg-red-50 border border-red-300 text-red-700'
+        msgEl.innerHTML = `
+          <p class="font-bold mb-1">⚠️ 送信できません</p>
+          <p>報告時間（${(V * 60).toFixed(0)}分）が滞在時間（${(Y * 60).toFixed(0)}分）を超えています。</p>
+          <p class="mt-1">報告内容を修正するか、もう少し時間が経過してから入力してください。</p>`
+        msgEl.classList.remove('hidden')
+        return
+
+      } else if (Z <= 0) {
+        msgEl.className = 'rounded-xl p-4 text-sm bg-yellow-50 border border-yellow-300 text-yellow-700'
+        msgEl.innerHTML = `
+          <p class="font-bold mb-1">⚠️ 授業時間ぴったりです</p>
+          <p>${minExitStr} 以降に退室できます。</p>`
+        msgEl.classList.remove('hidden')
+
+      } else {
+        msgEl.classList.add('hidden')
+      }
+
+      this.textContent = '確認中...'
+      this.disabled = true
+
+      const fmtDate = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+
+      // 勤務記録データを state に保存（退室時に clockOutTime と一緒に送信）
+      state.pendingReport = {
+        action      : 'report',
+        staffId     : state.staff.staffId,
+        name        : state.staff.name,
+        date        : fmtDate(clockIn),
+        lessons     : collectLessons(),
+        clockInTime : state.clockInTime || '',
+        clockOutTime: '',   // clockOut() 時に上書き
+        V           : V,
+      }
+
+      // 最低退室時刻を state に保存・退室画面に表示
+      state.minExitDate = new Date(clockIn.getTime() + V * 3600000)
+      const minStr = state.minExitDate.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+      document.getElementById('min-exit-msg').textContent = `🕐 ${minStr} 以降に退室できます`
+
+      // 退室画面へ
+      document.getElementById('done-before-out').classList.remove('hidden')
+      document.getElementById('done-after-out').classList.add('hidden')
+      document.getElementById('early-exit-err').classList.add('hidden')
+      showScreen('done')
+    }
+
+    // ─── Utils ───────────────────────────────────────────────────────────────
+    function mockDelay(ms) {
+      return new Promise(r => setTimeout(r, ms))
+    }
+
+    // ─── Init ────────────────────────────────────────────────────────────────
+    async function init() {
+      setInterval(updateClock, 1000)
+      updateClock()
+
+      if (DEV_MODE) {
+        // モック：そのまま打刻画面へ
+        await mockDelay(1000)
+        state.staff.commutes = [
+          { label: '自転車', allowance: 0 },
+          { label: '電車', allowance: 360 },
+        ]
+        document.getElementById('staff-name').textContent = state.staff.name + ' 先生'
+        renderCommuteOptions(state.staff.commutes)
+        showScreen('clock')
+        return
+      }
+
+      // ── 本番：LIFF初期化 ──
+      try {
+        await liff.init({ liffId: LIFF_ID })
+
+        if (!liff.isLoggedIn()) {
+          liff.login()
+          return
+        }
+
+        // LINEプロフィール取得
+        const profile = await liff.getProfile()
+        const lineUserId = profile.userId
+
+        // GASから講師情報取得
+        const staff = await gasGet({ action: 'getStaff', lineUserId })
+
+        if (!staff) {
+          // 講師マスタに未登録
+          document.getElementById('screen-loading').innerHTML = `
+            <div class="text-center px-6">
+              <p class="text-4xl mb-4">🚫</p>
+              <p class="text-lg font-bold text-gray-700">登録されていません</p>
+              <p class="text-sm text-gray-500 mt-2">あなたのLINE ID：</p>
+              <p class="text-xs font-mono bg-gray-100 rounded p-2 mt-1 break-all">${lineUserId}</p>
+              <p class="text-sm text-gray-500 mt-2">このIDを講師マスタに追加してください</p>
+            </div>`
+          return
+        }
+
+        // state に講師情報をセット
+        state.staff = {
+          staffId  : staff.staffId,
+          name     : staff.name,
+          commutes : staff.commutes || [],
+        }
+
+        document.getElementById('staff-name').textContent = staff.name + ' 先生'
+        document.getElementById('avatar').textContent = staff.name.charAt(0)
+        renderCommuteOptions(staff.commutes || [])
+        showScreen('clock')
+
+      } catch (err) {
+        document.getElementById('screen-loading').innerHTML = `
+          <div class="text-center px-6">
+            <p class="text-4xl mb-4">⚠️</p>
+            <p class="text-lg font-bold text-gray-700">エラーが発生しました</p>
+            <p class="text-sm text-gray-500 mt-2">${err.message}</p>
+          </div>`
+      }
+    }
+
+    init()
+  </script>
+</body>
+</html>
