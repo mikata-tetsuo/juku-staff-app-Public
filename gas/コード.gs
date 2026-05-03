@@ -423,9 +423,8 @@ function monthlyUpdate() {
   let updated = 0
 
   masterRows.forEach(master => {
-    const name     = master[2]
-    const grade    = master[3]
-    const chiefNum = Number(master[5]) || 0  // F列：チーフ数
+    const name  = master[2]
+    const grade = master[3]
 
     if (!name) return
 
@@ -437,7 +436,7 @@ function monthlyUpdate() {
       Logger.log(`テンプレートからシート作成: ${name}`)
     }
 
-    fillStaffSheet(staffSheet, name, grade, periodStart, dayCount, rateData, rateHeaders, chiefNum)
+    fillStaffSheet(staffSheet, name, grade, periodStart, dayCount, rateData, rateHeaders)
     updated++
   })
 
@@ -455,7 +454,7 @@ function monthlyUpdate() {
 //  GASが書くのは：氏名・グレード・日付・コマ単価・チーフ手当 のみ
 // ============================================================
 
-function fillStaffSheet(sheet, staffName, grade, periodStart, dayCount, rateData, rateHeaders, chiefNum) {
+function fillStaffSheet(sheet, staffName, grade, periodStart, dayCount, rateData, rateHeaders) {
 
   // ── データ行をクリア（C〜R授業コマ数、T〜Z日次計算、AA交通費）──
   sheet.getRange(DATA_START_ROW, 3,  DATA_MAX_ROWS, 16).clearContent() // C-R
@@ -463,8 +462,6 @@ function fillStaffSheet(sheet, staffName, grade, periodStart, dayCount, rateData
   sheet.getRange(DATA_START_ROW, COL_AA, DATA_MAX_ROWS, 1).clearContent() // AA
   // コマ単価行（35行目）をクリア
   sheet.getRange(RATE_ROW, 3, 1, 16).clearContent()  // C35:R35
-  // チーフ手当（W36）をクリア
-  sheet.getRange(CALC_ROW, 23).clearContent()
 
   // ── スタッフ情報（A2, A4）──
   sheet.getRange('A2').setValue(staffName)
@@ -500,8 +497,9 @@ function fillStaffSheet(sheet, staffName, grade, periodStart, dayCount, rateData
     })
   }
 
-  // ── W36：チーフ手当（2000円 × チーフ数）──
-  sheet.getRange(CALC_ROW, 23).setValue(chiefNum > 0 ? 2000 * chiefNum : 0)
+  // W36（チーフ手当）・X36（合計支給額）はテンプレートの数式で自動計算
+  // ※ W36 = VLOOKUP(A2,講師マスタ!C:F,4,FALSE)*2000
+  // ※ X36 = T36+U36+W36
 }
 
 // ============================================================
