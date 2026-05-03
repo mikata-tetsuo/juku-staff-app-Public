@@ -368,14 +368,24 @@ function monthlyBackup(ss, masters, endDate) {
 // ============================================================
 //  月次更新（バックアップ確認後、手動実行）
 //  ① 打刻ログ・勤務記録ログをクリア
-//  ② 各講師シートを新しい期間でリセット
+//  ② 各講師シートをテンプレートから再生成（または更新）
 // ============================================================
 
 function monthlyUpdate() {
   const ss    = SpreadsheetApp.getActiveSpreadsheet()
   const today = new Date()
 
-  // 新しい期間を計算（実行日≧21日なら「今月21日〜来月20日」）
+  // ── テンプレートシートの確認 ──
+  const templateSheet = ss.getSheetByName('テンプレート')
+  if (!templateSheet) {
+    SpreadsheetApp.getUi().alert(
+      '「テンプレート」シートが見つかりません！\n' +
+      'シート名を「テンプレート」にして再実行してください。'
+    )
+    return
+  }
+
+  // ── 新しい期間を計算（実行日≧21日なら「今月21日〜来月20日」）──
   let periodStart, periodEnd
   if (today.getDate() >= 21) {
     periodStart = new Date(today.getFullYear(), today.getMonth(), 21)
@@ -386,8 +396,7 @@ function monthlyUpdate() {
   }
 
   // 期間の日数を計算（月によって28〜31日）
-  const dayCount = Math.round((periodEnd - periodStart) / 86400000) + 1
-
+  const dayCount   = Math.round((periodEnd - periodStart) / 86400000) + 1
   const startLabel = Utilities.formatDate(periodStart, 'Asia/Tokyo', 'M/d')
   const endLabel   = Utilities.formatDate(periodEnd,   'Asia/Tokyo', 'M/d')
 
@@ -422,11 +431,13 @@ function monthlyUpdate() {
 
     let staffSheet = ss.getSheetByName(name)
     if (!staffSheet) {
-      staffSheet = ss.insertSheet(name)
-      Logger.log(`新規シート作成: ${name}`)
+      // テンプレートをコピーして新規作成
+      staffSheet = templateSheet.copyTo(ss)
+      staffSheet.setName(name)
+      Logger.log(`テンプレートからシート作成: ${name}`)
     }
 
-    setupStaffSheet(staffSheet, name, grade, periodStart, dayCount, rateData, rateHeaders, chiefNum)
+    fillStaffSheet(staffSheet, name, grade, periodStart, dayCount, rateData, rateHeaders, chiefNum)
     updated++
   })
 
@@ -440,75 +451,45 @@ function monthlyUpdate() {
 }
 
 // ============================================================
-//  講師シートをテンプレートから再生成
+//  講師シートにデータを書き込み（構造・数式はテンプレートから引き継ぎ）
+//  GASが書くのは：氏名・グレード・日付・コマ単価・チーフ手当 のみ
 // ============================================================
 
-function setupStaffSheet(sheet, staffName, grade, periodStart, dayCount, rateData, rateHeaders, chiefNum) {
+function fillStaffSheet(sheet, staffName, grade, periodStart, dayCount, rateData, rateHeaders, chiefNum) {
 
-  // ── データエリアをクリア（B2:AA36）──
-  sheet.getRange(DATA_START_ROW, 2, CALC_ROW - DATA_START_ROW + 1, COL_AA - 1).clearContent()
+  // ── データ行をクリア（C〜R授業コマ数、T〜Z日次計算、AA交通費）──
+  sheet.getRange(DATA_START_ROW, 3,  DATA_MAX_ROWS, 16).clearContent() // C-R
+  sheet.getRange(DATA_START_ROW, 20, DATA_MAX_ROWS, 7).clearContent()  // T-Z
+  sheet.getRange(DATA_START_ROW, COL_AA, DATA_MAX_ROWS, 1).clearContent() // AA
+  // コマ単価行（35行目）をクリア
+  sheet.getRange(RATE_ROW, 3, 1, 16).clearContent()  // C35:R35
+  // チーフ手当（W36）をクリア
+  sheet.getRange(CALC_ROW, 23).clearContent()
 
-  // ── スタッフ情報（A2〜A4）──
+  // ── スタッフ情報（A2, A4）──
   sheet.getRange('A2').setValue(staffName)
-  sheet.getRange('A3').setValue('グレード')
   sheet.getRange('A4').setValue(grade)
 
-  // ── B列：日付（期間の日数分）──
+  // ── B列：日付（期間分だけ書き込み、残りは空欄）──
   const dateValues = []
   for (let d = 0; d < DATA_MAX_ROWS; d++) {
     if (d < dayCount) {
       dateValues.push([new Date(periodStart.getTime() + d * 86400000)])
     } else {
-      dateValues.push([''])  // 期間外は空欄
+      dateValues.push([''])
     }
   }
   const dateRange = sheet.getRange(DATA_START_ROW, 2, DATA_MAX_ROWS, 1)
   dateRange.setValues(dateValues)
   dateRange.setNumberFormat('M/d(ddd)')
 
-  // ── 33行目：合計行 ──
-  sheet.getRange(SUM_ROW, 1).setValue('合計')
-
-  // C〜R列（コマ数）の合計
-  for (let col = 3; col <= 18; col++) {
-    const L = columnToLetter(col)
-    sheet.getRange(SUM_ROW, col).setFormula(
-      `=SUM(${L}${DATA_START_ROW}:${L}${DATA_START_ROW + DATA_MAX_ROWS - 1})`
-    )
-  }
-  // T〜V列の合計（MM合計コマ, 非MM合計コマ, 勤務時間日計）
-  ;[20, 21, 22].forEach(col => {
-    const L = columnToLetter(col)
-    sheet.getRange(SUM_ROW, col).setFormula(
-      `=SUM(${L}${DATA_START_ROW}:${L}${DATA_START_ROW + DATA_MAX_ROWS - 1})`
-    )
-  })
-  // Y列（合計時間）の合計
-  sheet.getRange(SUM_ROW, 25).setFormula(
-    `=SUM(Y${DATA_START_ROW}:Y${DATA_START_ROW + DATA_MAX_ROWS - 1})`
-  )
-  // AA列（交通費）の合計
-  sheet.getRange(SUM_ROW, COL_AA).setFormula(
-    `=SUM(AA${DATA_START_ROW}:AA${DATA_START_ROW + DATA_MAX_ROWS - 1})`
-  )
-
-  // ── 34行目：ラベル ──
-  sheet.getRange(LABEL_ROW, 1).setValue('コマ単価')
-  sheet.getRange(LABEL_ROW, 20).setValue('授業料合計')
-  sheet.getRange(LABEL_ROW, 21).setValue('交通費合計')
-  sheet.getRange(LABEL_ROW, 22).setValue('出勤数')
-  sheet.getRange(LABEL_ROW, 23).setValue('チーフ手当')
-  sheet.getRange(LABEL_ROW, 24).setValue('合計支給額')
-
   // ── 35行目：コマ単価（グレード時給表から転記）──
-  sheet.getRange(RATE_ROW, 1).setValue('コマ単価')
-
   const gradeColIdx = rateHeaders.indexOf(grade)  // 0始まりのインデックス
   if (gradeColIdx < 0) {
     Logger.log(`グレード "${grade}" が時給表に見つかりません（${staffName}）`)
   } else {
     Object.entries(RATE_LABEL).forEach(([staffColStr, rateLabel]) => {
-      const staffCol  = parseInt(staffColStr)
+      const staffCol   = parseInt(staffColStr)
       const rateRowIdx = rateData.findIndex(r => r[0] === rateLabel)
       if (rateRowIdx < 0) {
         Logger.log(`時給表に行なし: "${rateLabel}"`)
@@ -519,26 +500,8 @@ function setupStaffSheet(sheet, staffName, grade, periodStart, dayCount, rateDat
     })
   }
 
-  // ── 36行目：授業料（= 35行 × 33行）& 集計 ──
-  sheet.getRange(CALC_ROW, 1).setValue('授業料')
-
-  for (let col = 3; col <= 18; col++) {
-    const L = columnToLetter(col)
-    sheet.getRange(CALC_ROW, col).setFormula(`=${L}${RATE_ROW}*${L}${SUM_ROW}`)
-  }
-
-  // T36：授業料合計（C〜R列合計）
-  sheet.getRange(CALC_ROW, 20).setFormula(`=SUM(C${CALC_ROW}:R${CALC_ROW})`)
-  // U36：交通費合計（AA列合計）
-  sheet.getRange(CALC_ROW, 21).setFormula(`=AA${SUM_ROW}`)
-  // V36：出勤数（Y列にデータがある行数）
-  sheet.getRange(CALC_ROW, 22).setFormula(
-    `=COUNTA(Y${DATA_START_ROW}:Y${DATA_START_ROW + DATA_MAX_ROWS - 1})`
-  )
-  // W36：チーフ手当（2000円 × チーフ数）
+  // ── W36：チーフ手当（2000円 × チーフ数）──
   sheet.getRange(CALC_ROW, 23).setValue(chiefNum > 0 ? 2000 * chiefNum : 0)
-  // X36：合計支給額（授業料 + 交通費 + チーフ手当）
-  sheet.getRange(CALC_ROW, 24).setFormula(`=T${CALC_ROW}+U${CALC_ROW}+W${CALC_ROW}`)
 }
 
 // ============================================================
