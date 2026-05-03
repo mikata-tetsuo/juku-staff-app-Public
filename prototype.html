@@ -327,7 +327,7 @@
         const V = state.pendingReport.V || 0
         const Z = Y - V
 
-        if (Z >= 1) {
+        if (DEV_MODE ? Z >= 0 : Z >= 1) {  // DEV_MODE時は必ず理由選択画面を表示
           state.pendingClockOut = now
           state.pendingReason   = null
           const zh = Math.floor(Z)
