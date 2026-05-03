@@ -270,9 +270,7 @@ function nightlyBatch() {
       // W列（23）入室, X列（24）退室
       if (inTime)  staffSheet.getRange(i + 1, 23).setValue(inTime)
       if (outTime) staffSheet.getRange(i + 1, 24).setValue(outTime)
-      // Y列（25）合計時間, Z列（26）時間差
-      if (Y > 0)   staffSheet.getRange(i + 1, 25).setValue(Y / 24)
-      staffSheet.getRange(i + 1, 26).setValue(Z !== 0 ? Z / 24 : '')
+      // Y列（合計時間）= X-W、Z列（時間差）= Y-V はテンプレートの数式で自動計算
       // AA列（27）交通費 ← 追加
       const commuteAmt = clock.commuteAllowance || 0
       if (commuteAmt) staffSheet.getRange(i + 1, COL_AA).setValue(commuteAmt)
@@ -459,7 +457,8 @@ function fillStaffSheet(sheet, staffName, grade, periodStart, dayCount, rateData
   // ※ V列（22）はテンプレートの数式のため clearContent しない
   sheet.getRange(DATA_START_ROW, 3,  DATA_MAX_ROWS, 16).clearContent() // C-R
   sheet.getRange(DATA_START_ROW, 20, DATA_MAX_ROWS, 2).clearContent()  // T-U
-  sheet.getRange(DATA_START_ROW, 23, DATA_MAX_ROWS, 4).clearContent()  // W-Z
+  sheet.getRange(DATA_START_ROW, 23, DATA_MAX_ROWS, 2).clearContent()  // W-X（入退室）
+  // Y（合計時間）・Z（時間差）はテンプレートの数式のためクリアしない
   sheet.getRange(DATA_START_ROW, COL_AA, DATA_MAX_ROWS, 1).clearContent() // AA
   // コマ単価行（35行目）をクリア
   sheet.getRange(RATE_ROW, 3, 1, 16).clearContent()  // C35:R35
@@ -572,6 +571,46 @@ function columnToLetter(col) {
     col    = Math.floor((col - 1) / 26)
   }
   return letter
+}
+
+// ============================================================
+//  テンプレートの数式セルを保護（一度だけ実行）
+//  ※ 編集しようとすると警告が出るが、強制的に編集は可能
+// ============================================================
+
+function protectTemplateFormulas() {
+  const ss    = SpreadsheetApp.getActiveSpreadsheet()
+  const sheet = ss.getSheetByName('テンプレート')
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('「テンプレート」シートが見つかりません')
+    return
+  }
+
+  // 既存の保護を一旦クリア
+  sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach(p => p.remove())
+
+  // 保護するセル範囲の定義
+  const targets = [
+    { range: sheet.getRange('V2:V32'),  desc: '勤務時間日計（数式）' },
+    { range: sheet.getRange('Y2:Y32'),  desc: '合計時間（数式）' },
+    { range: sheet.getRange('Z2:Z32'),  desc: '時間差（数式）' },
+    { range: sheet.getRange('33:33'),   desc: '合計行（数式）' },
+    { range: sheet.getRange('C36:S36'), desc: '授業料・集計行（数式）' },
+  ]
+
+  targets.forEach(({ range, desc }) => {
+    const protection = range.protect()
+    protection.setDescription(desc)
+    protection.setWarningOnly(true)  // 警告のみ（誤操作防止）
+  })
+
+  SpreadsheetApp.getUi().alert(
+    '数式セルの保護を設定しました！\n\n' +
+    '保護したセル:\n' +
+    targets.map(t => `・${t.desc}`).join('\n') +
+    '\n\n※ 編集しようとすると警告が出ます（強制編集は可能）'
+  )
+  Logger.log('テンプレート保護設定完了')
 }
 
 // ============================================================
