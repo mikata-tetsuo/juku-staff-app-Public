@@ -111,6 +111,45 @@
   </div>
 
   <!-- 完了・退室画面 -->
+  <!-- 理由選択画面（Z≥1h時に表示）-->
+  <div id="screen-reason" class="screen h-full overflow-hidden">
+    <div class="flex flex-col h-full p-6 gap-4">
+      <div class="text-center pt-4">
+        <div class="text-5xl mb-3">⚠️</div>
+        <h2 class="text-lg font-bold text-gray-800">滞在時間と勤務記録に差があります</h2>
+        <p id="z-diff-text" class="mt-2 text-orange-500 font-semibold text-base"></p>
+        <p class="text-gray-500 text-sm mt-1">理由を選択して退室してください</p>
+      </div>
+      <div class="flex flex-col gap-3 mt-1">
+        <button onclick="selectReason('休憩','reason-btn-0')" id="reason-btn-0"
+          class="reason-btn w-full py-4 rounded-2xl border-2 text-base font-semibold transition-all border-gray-300 text-gray-700 bg-white">
+          ☕ 休憩
+        </button>
+        <button onclick="selectReason('途中外出','reason-btn-1')" id="reason-btn-1"
+          class="reason-btn w-full py-4 rounded-2xl border-2 text-base font-semibold transition-all border-gray-300 text-gray-700 bg-white">
+          🚶 途中外出
+        </button>
+        <button onclick="selectReason('途中帰宅','reason-btn-2')" id="reason-btn-2"
+          class="reason-btn w-full py-4 rounded-2xl border-2 text-base font-semibold transition-all border-gray-300 text-gray-700 bg-white">
+          🏠 途中帰宅
+        </button>
+        <button onclick="selectReason('その他','reason-btn-3')" id="reason-btn-3"
+          class="reason-btn w-full py-4 rounded-2xl border-2 text-base font-semibold transition-all border-gray-300 text-gray-700 bg-white">
+          ✏️ その他
+        </button>
+      </div>
+      <div id="other-input-area" class="hidden">
+        <textarea id="other-reason-text"
+          placeholder="理由を入力してください"
+          class="w-full border-2 border-gray-300 rounded-xl p-3 text-sm resize-none h-20 focus:border-[#06C755] focus:outline-none"></textarea>
+      </div>
+      <button id="btn-confirm-reason" onclick="confirmReason()"
+        class="mt-auto w-full py-5 bg-[#06C755] text-white text-xl font-bold rounded-2xl shadow-md active:scale-95 transition-transform">
+        🟢 退室する
+      </button>
+    </div>
+  </div>
+
   <div id="screen-done" class="screen h-full items-center justify-center px-6">
     <!-- 退室前 -->
     <div id="done-before-out" class="flex flex-col items-center gap-5 w-full">
@@ -156,12 +195,14 @@
 
     // ─── State ───────────────────────────────────────────────────────────────
     const state = {
-      clockInTime   : null,
-      clockInDate   : null,
-      minExitDate   : null,
-      pendingReport : null,
-      commute       : null,   // 選択中の通勤手段 { label, allowance }
-      staff         : { staffId: 'S001', name: '田中 花子', commutes: [] },
+      clockInTime    : null,
+      clockInDate    : null,
+      minExitDate    : null,
+      pendingReport  : null,
+      pendingClockOut: null,  // 理由選択中に退室時刻を保持
+      pendingReason  : null,  // 選択した理由
+      commute        : null,  // 選択中の通勤手段 { label, allowance }
+      staff          : { staffId: 'S001', name: '田中 花子', commutes: [] },
     }
 
     // ─── 通勤手段ボタン描画 ───────────────────────────────────────────────────
@@ -262,9 +303,11 @@
     document.getElementById('btn-clock-in').onclick = clockIn
 
     // ─── 退室 ────────────────────────────────────────────────────────────────
+    const fmtTime = d => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+
     async function clockOut() {
-      const now    = new Date()
-      const errEl  = document.getElementById('early-exit-err')
+      const now   = new Date()
+      const errEl = document.getElementById('early-exit-err')
 
       // ── 最低退室時刻チェック ──
       if (state.minExitDate && now < state.minExitDate) {
@@ -275,37 +318,101 @@
       }
       errEl.classList.add('hidden')
 
-      const btn = document.getElementById('btn-clock-out')
+      // ── Z（時間差）を計算：1h以上なら理由選択へ ──
+      if (state.clockInTime && state.pendingReport) {
+        const [ih, im] = state.clockInTime.split(':').map(Number)
+        const nowMins  = now.getHours() * 60 + now.getMinutes()
+        const inMins   = ih * 60 + im
+        const Y = (nowMins - inMins) / 60
+        const V = state.pendingReport.V || 0
+        const Z = Y - V
+
+        if (Z >= 1) {
+          state.pendingClockOut = now
+          state.pendingReason   = null
+          const zh = Math.floor(Z)
+          const zm = Math.round((Z - zh) * 60)
+          document.getElementById('z-diff-text').textContent =
+            `時間差 ${zh}時間${zm > 0 ? zm + '分' : ''}（通常は15分以内が目安）`
+          // ボタンをリセット
+          document.querySelectorAll('.reason-btn').forEach(b => {
+            b.classList.remove('bg-[#06C755]','text-white','border-[#06C755]')
+            b.classList.add('border-gray-300','text-gray-700','bg-white')
+          })
+          document.getElementById('other-input-area').classList.add('hidden')
+          document.getElementById('other-reason-text').value = ''
+          showScreen('reason')
+          return
+        }
+      }
+
+      await submitClockOut(now, '')
+    }
+
+    // ── 理由ボタン選択 ──
+    function selectReason(reason, btnId) {
+      state.pendingReason = reason
+      document.querySelectorAll('.reason-btn').forEach(b => {
+        b.classList.remove('bg-[#06C755]','text-white','border-[#06C755]')
+        b.classList.add('border-gray-300','text-gray-700','bg-white')
+      })
+      const sel = document.getElementById(btnId)
+      sel.classList.add('bg-[#06C755]','text-white','border-[#06C755]')
+      sel.classList.remove('border-gray-300','text-gray-700','bg-white')
+      document.getElementById('other-input-area').classList.toggle('hidden', reason !== 'その他')
+    }
+
+    // ── 理由確定して退室 ──
+    async function confirmReason() {
+      let reason = state.pendingReason
+      if (!reason) { alert('理由を選択してください'); return }
+      if (reason === 'その他') {
+        const text = document.getElementById('other-reason-text').value.trim()
+        if (!text) { alert('理由を入力してください'); return }
+        reason = `その他: ${text}`
+      }
+      const btn = document.getElementById('btn-confirm-reason')
       btn.textContent = '処理中...'
       btn.disabled = true
+      await submitClockOut(state.pendingClockOut, reason)
+      btn.textContent = '🟢 退室する'
+      btn.disabled = false
+    }
 
-      const fmtTime = d => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+    // ── 退室処理（共通）──
+    async function submitClockOut(now, reason) {
+      const btn = document.getElementById('btn-clock-out')
+      if (btn) { btn.textContent = '処理中...'; btn.disabled = true }
 
       if (DEV_MODE) {
         await mockDelay(500)
-        console.log('[mock] 退室:', { time: now.toISOString() })
+        console.log('[mock] 退室:', { time: now.toISOString(), reason })
         if (state.pendingReport) console.log('[mock] 勤務記録送信:', state.pendingReport)
       } else {
-        // 退室打刻と勤務記録を同時送信
         await Promise.all([
           gasPost({
-            action    : 'attendance',
-            staffId   : state.staff.staffId,
-            name      : state.staff.name,
-            type      : 'out',
-            timestamp : now.toISOString(),
-            location  : null,
+            action           : 'attendance',
+            staffId          : state.staff.staffId,
+            name             : state.staff.name,
+            type             : 'out',
+            timestamp        : now.toISOString(),
+            location         : null,
+            commuteLabel     : state.commute?.label     || '',
+            commuteAllowance : state.commute?.allowance || 0,
+            reason,
           }),
           state.pendingReport ? gasPost({
             ...state.pendingReport,
             clockOutTime: fmtTime(now),
+            reason,
           }) : Promise.resolve(),
         ])
       }
 
-      // 退室後の表示に切り替え
+      // 退室後の表示へ
       document.getElementById('done-before-out').classList.add('hidden')
       document.getElementById('done-after-out').classList.remove('hidden')
+      showScreen('done')
     }
 
     document.getElementById('btn-clock-out').onclick = clockOut

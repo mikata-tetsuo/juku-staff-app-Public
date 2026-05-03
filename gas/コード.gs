@@ -119,7 +119,7 @@ function getStaffByLineId(lineUserId) {
 //  打刻ログ保存
 // ============================================================
 
-function saveAttendance({ staffId, name, type, timestamp, location, commuteLabel, commuteAllowance }) {
+function saveAttendance({ staffId, name, type, timestamp, location, commuteLabel, commuteAllowance, reason }) {
   const sheet = getSheet(SHEET.CLOCK)
   const now   = new Date(timestamp)
   const date  = formatDate(now)
@@ -127,12 +127,13 @@ function saveAttendance({ staffId, name, type, timestamp, location, commuteLabel
   const lat   = location ? location.lat : ''
   const lng   = location ? location.lng : ''
 
-  // ヘッダー: [タイムスタンプ, スタッフID, 氏名, 打刻種別, 日付, 時刻, 緯度, 経度, 通勤手段, 通勤手当]
+  // ヘッダー: [タイムスタンプ, スタッフID, 氏名, 打刻種別, 日付, 時刻, 緯度, 経度, 通勤手段, 通勤手当, 備考]
   sheet.appendRow([
     new Date(), staffId, name,
     type === 'in' ? '出勤' : '退勤',
     date, time, lat, lng,
     commuteLabel || '', commuteAllowance || 0,
+    reason || '',
   ])
 
   return { success: true, date, time }
@@ -189,7 +190,7 @@ function nightlyBatch() {
   const clockRows = getSheet(SHEET.CLOCK).getDataRange().getValues().slice(1)
   const clockMap  = {}  // { staffId: { date: { in, out, commuteLabel, commuteAllowance } } }
   clockRows.forEach(row => {
-    const [, staffId,, type, date, time,,, commuteLabel, commuteAllowance] = row
+    const [, staffId,, type, date, time,,, commuteLabel, commuteAllowance, reason] = row
     if (!isInRange(date, start, end)) return
     if (!clockMap[staffId])        clockMap[staffId] = {}
     if (!clockMap[staffId][date])  clockMap[staffId][date] = {}
@@ -198,7 +199,8 @@ function nightlyBatch() {
       clockMap[staffId][date].commuteLabel     = commuteLabel    || ''
       clockMap[staffId][date].commuteAllowance = commuteAllowance || 0
     } else {
-      clockMap[staffId][date].out = time
+      clockMap[staffId][date].out    = time
+      clockMap[staffId][date].reason = reason || ''
     }
   })
 
@@ -263,9 +265,12 @@ function nightlyBatch() {
       if (inTime)  staffSheet.getRange(i + 1, 23).setValue(inTime)
       if (outTime) staffSheet.getRange(i + 1, 24).setValue(outTime)
       // Y列（合計時間）= X-W、Z列（時間差）= Y-V はテンプレートの数式で自動計算
-      // AA列（27）交通費 ← 追加
+      // AA列（27）交通費
       const commuteAmt = clock.commuteAllowance || 0
       if (commuteAmt) staffSheet.getRange(i + 1, COL_AA).setValue(commuteAmt)
+      // AB列（28）備考（Z≥1h時の理由）
+      const reason = clock.reason || ''
+      if (reason) staffSheet.getRange(i + 1, 28).setValue(reason)
 
       // Z異常チェック（V>0 かつ Z<-0.25 または Z>=1）
       if (V > 0 && (Z < -0.25 || Z >= 1)) {
