@@ -256,15 +256,7 @@ function nightlyBatch() {
           staffSheet.getRange(i + 1, parseInt(col)).setValue(val || '')
         })
 
-        // T列（20）: MMコマ数日計
-        const tVal = MM_COLS.reduce((s, c) => s + (recDay[c] || 0), 0)
-        // U列（21）: MM以外日計
-        const uVal = NON_MM_COLS.reduce((s, c) => s + (recDay[c] || 0), 0)
-        // V列（22）: テンプレートの数式で自動計算（GASは書かない）
-        // =IF(T+U=0,"",(T*80+U*60)/60/24)
-
-        if (tVal > 0) staffSheet.getRange(i + 1, 20).setValue(tVal)
-        if (uVal > 0) staffSheet.getRange(i + 1, 21).setValue(uVal)
+        // T列（MM合計）・U列（非MM合計）・V列（勤務時間）はテンプレートの数式で自動計算
       }
 
       // W列（23）入室, X列（24）退室
@@ -453,12 +445,10 @@ function monthlyUpdate() {
 
 function fillStaffSheet(sheet, staffName, grade, periodStart, dayCount, rateData, rateHeaders) {
 
-  // ── データ行をクリア（C〜R授業コマ数、T-U・W-Z日次計算、AA交通費）──
-  // ※ V列（22）はテンプレートの数式のため clearContent しない
-  sheet.getRange(DATA_START_ROW, 3,  DATA_MAX_ROWS, 16).clearContent() // C-R
-  sheet.getRange(DATA_START_ROW, 20, DATA_MAX_ROWS, 2).clearContent()  // T-U
+  // ── データ行をクリア（C〜R授業コマ数・W-X入退室・AA交通費）──
+  // ※ T・U・V・Y・Z はテンプレートの数式のため clearContent しない
+  sheet.getRange(DATA_START_ROW, 3,  DATA_MAX_ROWS, 16).clearContent() // C-R（授業コマ数）
   sheet.getRange(DATA_START_ROW, 23, DATA_MAX_ROWS, 2).clearContent()  // W-X（入退室）
-  // Y（合計時間）・Z（時間差）はテンプレートの数式のためクリアしない
   sheet.getRange(DATA_START_ROW, COL_AA, DATA_MAX_ROWS, 1).clearContent() // AA
   // コマ単価行（35行目）をクリア
   sheet.getRange(RATE_ROW, 3, 1, 16).clearContent()  // C35:R35
@@ -591,6 +581,8 @@ function protectTemplateFormulas() {
 
   // 保護するセル範囲の定義
   const targets = [
+    { range: sheet.getRange('T2:T32'),  desc: 'MM合計コマ（数式）' },
+    { range: sheet.getRange('U2:U32'),  desc: '非MM合計コマ（数式）' },
     { range: sheet.getRange('V2:V32'),  desc: '勤務時間日計（数式）' },
     { range: sheet.getRange('Y2:Y32'),  desc: '合計時間（数式）' },
     { range: sheet.getRange('Z2:Z32'),  desc: '時間差（数式）' },
