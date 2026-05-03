@@ -389,19 +389,9 @@ function monthlyUpdate() {
   const startLabel = Utilities.formatDate(periodStart, 'Asia/Tokyo', 'M/d')
   const endLabel   = Utilities.formatDate(periodEnd,   'Asia/Tokyo', 'M/d')
 
-  // ── 1. 打刻ログをクリア（ヘッダー残し）──
-  const clockLog = getSheet(SHEET.CLOCK)
-  if (clockLog.getLastRow() > 1) {
-    clockLog.deleteRows(2, clockLog.getLastRow() - 1)
-  }
+  // ── 打刻ログ・勤務記録ログはクリアしない（履歴として蓄積）──
 
-  // ── 2. 勤務記録ログをクリア（ヘッダー残し）──
-  const workLog = getSheet(SHEET.RECORD)
-  if (workLog.getLastRow() > 1) {
-    workLog.deleteRows(2, workLog.getLastRow() - 1)
-  }
-
-  // ── 3. グレード時給表を読み込み ──
+  // ── グレード時給表を読み込み ──
   const rateSheet   = getSheet(SHEET.RATE)
   const rateData    = rateSheet.getDataRange().getValues()
   // 1行目: ['※1コマ80分', '研修', 'B1', 'B2', ..., 'A12']
@@ -433,7 +423,7 @@ function monthlyUpdate() {
     `月次更新が完了しました！\n\n` +
     `期間: ${startLabel} 〜 ${endLabel}（${dayCount}日間）\n` +
     `更新シート: ${updated}件\n\n` +
-    `打刻ログ・勤務記録ログをクリアしました。`
+    `※ 打刻ログ・勤務記録ログは履歴として保持しています`
   )
   Logger.log(`月次更新完了: ${startLabel}〜${endLabel} / ${updated}件`)
 }
