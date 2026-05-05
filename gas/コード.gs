@@ -2,6 +2,92 @@
 //  塾講師管理アプリ - GAS Web App
 // ============================================================
 
+// ============================================================
+//  カスタムメニュー（スプレッドシートを開いたとき自動生成）
+// ============================================================
+
+// ============================================================
+//  onEdit トリガー：お知らせシートで type を選ぶと itemId を自動採番
+//  ・お知らせ → N001, N002, ...
+//  ・タスク   → T001, T002, ...
+//  ※ A列に既に値があれば上書きしない（手動入力を尊重）
+// ============================================================
+
+function onEdit(e) {
+  if (!e || !e.range) return
+  const sheet = e.range.getSheet()
+  if (sheet.getName() !== 'お知らせ') return
+
+  const startRow = e.range.getRow()
+  const startCol = e.range.getColumn()
+  const numRows  = e.range.getNumRows()
+  const numCols  = e.range.getNumColumns()
+
+  // B列（type）が編集範囲に含まれていなければ無視
+  if (startCol > 2 || startCol + numCols <= 2) return
+
+  for (let i = 0; i < numRows; i++) {
+    const row = startRow + i
+    if (row === 1) continue  // ヘッダー除外
+
+    const type = sheet.getRange(row, 2).getValue()
+    if (!type) continue
+
+    const itemIdCell = sheet.getRange(row, 1)
+    if (itemIdCell.getValue()) continue  // 既に値あり → スキップ
+
+    let prefix
+    if (type === 'お知らせ')      prefix = 'N'
+    else if (type === 'タスク')   prefix = 'T'
+    else continue  // 未対応 type
+
+    // 既存 itemId のうち同 prefix の最大番号を取得
+    const lastRow = sheet.getLastRow()
+    const ids = lastRow >= 2
+      ? sheet.getRange(2, 1, lastRow - 1, 1).getValues().flat()
+      : []
+    const maxNum = ids
+      .filter(v => typeof v === 'string' && v.startsWith(prefix))
+      .reduce((max, id) => {
+        const num = parseInt(id.slice(1), 10)
+        return isNaN(num) ? max : Math.max(max, num)
+      }, 0)
+
+    const nextId = `${prefix}${String(maxNum + 1).padStart(3, '0')}`
+    itemIdCell.setValue(nextId)
+  }
+}
+
+function onOpen() {
+  SpreadsheetApp.getActiveSpreadsheet().addMenu('🏫 塾管理', [
+    { name: '🔄 修正バッチ実行（Z異常を再チェック）', functionName: 'runFixBatch' },
+    null,
+    { name: '📅 月次更新（手動）',                    functionName: 'monthlyUpdate' },
+    { name: '🛡 テンプレート保護設定',                functionName: 'protectTemplateFormulas' },
+    null,
+    { name: '📊 タスク確認状況を更新',                functionName: 'updateTaskDashboard' },
+    { name: '📋 お知らせ集計列を設定',                functionName: 'setupNoticeAggregation' },
+    null,
+    { name: '🔔 22:30リマインドトリガー設定',         functionName: 'setupEveningReminderTrigger' },
+    { name: '🔑 LINEトークン登録',                    functionName: 'promptLineChannelToken' },
+  ])
+}
+
+// 修正バッチ：nightlyBatch を手動実行 + 完了ダイアログ
+function runFixBatch() {
+  const ui = SpreadsheetApp.getUi()
+  const res = ui.alert(
+    '🔄 修正バッチ実行',
+    '打刻ログを再チェックして\nZ異常ハイライト・講師シート・総支給額を更新します。\n\n実行しますか？',
+    ui.ButtonSet.OK_CANCEL
+  )
+  if (res !== ui.Button.OK) return
+
+  nightlyBatch()
+
+  ui.alert('✅ 完了', '修正バッチが完了しました！\nZ異常が解消されていればハイライトが消えています。', ui.ButtonSet.OK)
+}
+
 // シート名
 const SHEET = {
   MASTER  : '講師マスタ',
@@ -68,8 +154,12 @@ const COL_AA         = 27   // AA列 = 交通費
 
 function doGet(e) {
   const action = e.parameter.action
-  if (action === 'getStaff')   return jsonResponse(getStaffByLineId(e.parameter.lineUserId))
-  if (action === 'getHistory') return jsonResponse(getClockHistory(e.parameter.staffId))
+  if (action === 'getStaff')          return jsonResponse(getStaffByLineId(e.parameter.lineUserId))
+  if (action === 'getHistory')        return jsonResponse(getHistory(e.parameter.staffId))
+  if (action === 'getNotices')        return jsonResponse(getNotices())
+  if (action === 'getPayrollHistory') return jsonResponse(getPayrollHistory(e.parameter.staffId))
+  if (action === 'getCurrentPayroll') return jsonResponse(getCurrentPayroll(e.parameter.staffId))
+  if (action === 'getItems')          return jsonResponse(getItems(e.parameter.staffId))
   return jsonResponse({ error: '不明なアクション' })
 }
 
@@ -77,8 +167,9 @@ function doPost(e) {
   try {
     const data   = JSON.parse(e.postData.contents)
     const action = data.action
-    if (action === 'attendance') return jsonResponse(saveAttendance(data))
-    if (action === 'report')     return jsonResponse(saveReport(data))
+    if (action === 'attendance')         return jsonResponse(saveAttendance(data))
+    if (action === 'report')             return jsonResponse(saveReport(data))
+    if (action === 'updateItemStatus')   return jsonResponse(updateItemStatus(data))
     return jsonResponse({ error: '不明なアクション' })
   } catch (err) {
     return jsonResponse({ error: err.message })
@@ -116,6 +207,334 @@ function getStaffByLineId(lineUserId) {
 }
 
 // ============================================================
+//  給与履歴取得（給与履歴シートから）
+// ============================================================
+
+function getPayrollHistory(staffId) {
+  if (!staffId) return { records: [] }
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('給与履歴')
+  if (!sheet) return { records: [] }
+
+  const rows = sheet.getDataRange().getValues().slice(1)
+  const fmt  = v => v instanceof Date
+    ? `${v.getFullYear()}/${v.getMonth()+1}/${v.getDate()}`
+    : String(v)
+
+  const records = rows
+    .filter(row => String(row[2]) === String(staffId))
+    .map(row => ({
+      start    : fmt(row[0]),
+      end      : fmt(row[1]),
+      lesson   : row[5] || 0,
+      transport: row[6] || 0,
+      chief    : row[7] || 0,
+      total    : row[8] || 0,
+      days     : row[9] || 0,
+    }))
+    .reverse()   // 新しい順
+    .slice(0, 12) // 最大12ヶ月
+
+  return { records }
+}
+
+// ============================================================
+//  現在の締め期間の暫定給与（講師シート T36/U36/V36/W36/X36 を直読み）
+// ============================================================
+
+function getCurrentPayroll(staffId) {
+  if (!staffId) return null
+
+  const masters = getSheet(SHEET.MASTER).getDataRange().getValues().slice(1)
+  const master  = masters.find(r => String(r[1]) === String(staffId))
+  if (!master) return null
+  const name = master[2]
+  if (!name) return null
+
+  const ss          = SpreadsheetApp.getActiveSpreadsheet()
+  const staffSheet  = ss.getSheetByName(name)
+  const today       = new Date()
+  const { start, end } = getClosingRange(today)
+  const period      = { start: ymdToMd(start), end: ymdToMd(end) }
+  // 集計バッチは深夜3-4時に走るので、表示時点で確定しているのは「前日まで」
+  const asOfDate    = new Date(today.getTime() - 86400000)
+  const asOf        = `${asOfDate.getMonth() + 1}/${asOfDate.getDate()}`
+
+  if (!staffSheet) {
+    return { period, asOf, lesson: 0, transport: 0, chief: 0, total: 0, days: 0 }
+  }
+
+  const lesson    = Number(staffSheet.getRange(CALC_ROW, 20).getValue()) || 0  // T36 授業料
+  const transport = Number(staffSheet.getRange(CALC_ROW, 21).getValue()) || 0  // U36 交通費
+  const days      = Number(staffSheet.getRange(CALC_ROW, 22).getValue()) || 0  // V36 出勤数
+  const chief     = Number(staffSheet.getRange(CALC_ROW, 23).getValue()) || 0  // W36 チーフ手当
+  const total     = Number(staffSheet.getRange(CALC_ROW, 24).getValue()) || 0  // X36 合計支給額
+
+  return { period, asOf, lesson, transport, chief, total, days }
+}
+
+// 'YYYY-MM-DD' → 'M/d'
+function ymdToMd(s) {
+  const m = String(s).match(/^\d{4}-(\d{2})-(\d{2})$/)
+  return m ? `${parseInt(m[1])}/${parseInt(m[2])}` : String(s)
+}
+
+// ============================================================
+//  お知らせシートに集計列（確認済/未確認/完了済/未完了 の人数）を追加
+//  メニュー「📋 お知らせ集計列を設定」から実行
+// ============================================================
+
+function setupNoticeAggregation() {
+  const ui = SpreadsheetApp.getUi()
+  const ss = SpreadsheetApp.getActiveSpreadsheet()
+  const sheet = ss.getSheetByName('お知らせ')
+  if (!sheet) {
+    ui.alert('「お知らせ」シートが見つかりません')
+    return
+  }
+
+  // ヘッダー判定
+  const lastCol = Math.max(sheet.getLastColumn(), 6)
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(h => String(h || '').trim())
+  const isLegacy = headers.indexOf('text') === -1
+
+  if (isLegacy) {
+    ui.alert(
+      '⚠️ お知らせシートが旧スキーマのままです',
+      '集計列を追加するには、まず以下の手順で新スキーマに移行してください:\n\n' +
+      '1. A列とB列を挿入\n' +
+      '2. ヘッダー行を「itemId | type | text | date | dueDate | expiry」に書き換え\n' +
+      '3. 既存データの itemId（例: N001）と type（お知らせ）を入力\n\n' +
+      '移行後、再度このメニューを実行してください。',
+      ui.ButtonSet.OK
+    )
+    return
+  }
+
+  // 集計列のヘッダー（G〜J列）
+  sheet.getRange(1, 7, 1, 4).setValues([['確認済', '未確認', '完了済', '未完了']])
+  sheet.getRange(1, 7, 1, 4)
+    .setBackground('#1565C0').setFontColor('white').setFontWeight('bold')
+
+  const lastRow = sheet.getLastRow()
+  if (lastRow >= 2) {
+    const formulas = []
+    for (let row = 2; row <= lastRow; row++) {
+      formulas.push([
+        `=IFERROR(COUNTIFS('お知らせ状態'!B:B, A${row}, 'お知らせ状態'!C:C, TRUE), 0)`,
+        `=COUNTA('講師マスタ'!C2:C) - G${row}`,
+        `=IF(B${row}="タスク", IFERROR(COUNTIFS('お知らせ状態'!B:B, A${row}, 'お知らせ状態'!D:D, TRUE), 0), "-")`,
+        `=IF(B${row}="タスク", COUNTA('講師マスタ'!C2:C) - I${row}, "-")`,
+      ])
+    }
+    sheet.getRange(2, 7, formulas.length, 4).setFormulas(formulas)
+  }
+
+  ui.alert('✅ 完了', '集計列（確認済/未確認/完了済/未完了）を追加しました。\n人数は自動更新されます。', ui.ButtonSet.OK)
+}
+
+// ============================================================
+//  タスク確認状況ダッシュボード（誰が何をやったか一覧）
+//  メニュー「📊 タスク確認状況を更新」から実行
+//  シート「タスク確認状況」を再生成: 行=お知らせ/タスク、列=講師
+// ============================================================
+
+function updateTaskDashboard() {
+  // メニューから呼ばれた場合のみUI、バッチからの場合はnull
+  let ui = null
+  try { ui = SpreadsheetApp.getUi() } catch (e) {}
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet()
+  const masterSheet = ss.getSheetByName('講師マスタ')
+  const itemsSheet  = ss.getSheetByName('お知らせ')
+
+  if (!masterSheet || !itemsSheet) {
+    if (ui) ui.alert('「講師マスタ」または「お知らせ」シートが見つかりません')
+    Logger.log('updateTaskDashboard: シートが見つかりません')
+    return
+  }
+
+  // 講師リスト（氏名のあるもののみ）
+  const masters = masterSheet.getDataRange().getValues().slice(1)
+  const teachers = masters
+    .filter(r => r[1] && r[2])
+    .map(r => ({ staffId: String(r[1]), name: String(r[2]) }))
+
+  if (teachers.length === 0) {
+    if (ui) ui.alert('講師マスタに講師が登録されていません')
+    Logger.log('updateTaskDashboard: 講師なし')
+    return
+  }
+
+  // アイテム取得（旧/新スキーマ両対応）
+  const itemsData = itemsSheet.getDataRange().getValues()
+  if (itemsData.length < 2) {
+    if (ui) ui.alert('お知らせシートにデータがありません')
+    Logger.log('updateTaskDashboard: データなし')
+    return
+  }
+  const itemHeader = itemsData[0].map(h => String(h || '').trim())
+  const idx = name => itemHeader.indexOf(name)
+  const iItem = idx('itemId')
+  const iType = idx('type')
+  const iText = idx('text')
+  const isLegacy = iText === -1
+
+  const items = itemsData.slice(1).map((row, i) => {
+    if (isLegacy) {
+      return { itemId: `legacy-${i}`, type: 'お知らせ', text: String(row[1] || '') }
+    }
+    return {
+      itemId: row[iItem] ? String(row[iItem]) : `legacy-${i}`,
+      type  : String(row[iType] || '').trim() || 'お知らせ',
+      text  : String(row[iText] || ''),
+    }
+  }).filter(item => item.text)
+
+  // 状態シート読み込み
+  const stateSheet = ss.getSheetByName('お知らせ状態')
+  const stateMap = {}  // { staffId: { itemId: {confirmed, completed} } }
+  if (stateSheet) {
+    stateSheet.getDataRange().getValues().slice(1).forEach(r => {
+      const sid = String(r[0])
+      const tid = String(r[1])
+      if (!sid || !tid) return
+      if (!stateMap[sid]) stateMap[sid] = {}
+      stateMap[sid][tid] = { confirmed: !!r[2], completed: !!r[3] }
+    })
+  }
+
+  // ダッシュボードシート再生成
+  let dashboard = ss.getSheetByName('タスク確認状況')
+  if (dashboard) ss.deleteSheet(dashboard)
+  dashboard = ss.insertSheet('タスク確認状況')
+
+  // ヘッダー: 種別 | 項目 | 講師1 | 講師2 | ...
+  const header = ['種別', '項目', ...teachers.map(t => t.name)]
+  dashboard.getRange(1, 1, 1, header.length).setValues([header])
+    .setBackground('#1565C0').setFontColor('white').setFontWeight('bold')
+
+  // 各行
+  if (items.length > 0) {
+    const rows = items.map(item => [
+      item.type,
+      item.text,
+      ...teachers.map(t => {
+        const st = stateMap[t.staffId]?.[item.itemId]
+        if (!st) return ''
+        if (item.type === 'タスク') {
+          if (st.completed) return '🎉'
+          if (st.confirmed) return '✓'
+          return ''
+        }
+        return st.confirmed ? '✓' : ''
+      })
+    ])
+    dashboard.getRange(2, 1, rows.length, header.length).setValues(rows)
+
+    // セルの中央寄せ（講師列のみ）
+    if (teachers.length > 0) {
+      dashboard.getRange(1, 3, rows.length + 1, teachers.length).setHorizontalAlignment('center')
+    }
+
+    // 交互色（薄グレーで読みやすく）
+    for (let i = 0; i < rows.length; i++) {
+      if (i % 2 === 1) {
+        dashboard.getRange(i + 2, 1, 1, header.length).setBackground('#F5F5F5')
+      }
+    }
+
+    // 全員完了の行は薄い緑にハイライト（タスク行のみ・交互色を上書き）
+    items.forEach((item, i) => {
+      if (item.type !== 'タスク') return
+      const allDone = teachers.every(t => stateMap[t.staffId]?.[item.itemId]?.completed)
+      if (allDone) {
+        dashboard.getRange(i + 2, 1, 1, header.length).setBackground('#E8F5E9')
+      }
+    })
+
+    // 罫線（全セル）
+    dashboard.getRange(1, 1, rows.length + 1, header.length)
+      .setBorder(true, true, true, true, true, true, '#CCCCCC', SpreadsheetApp.BorderStyle.SOLID)
+  }
+
+  // 列幅・行高さ
+  dashboard.setColumnWidth(1, 70)        // 種別
+  dashboard.setColumnWidth(2, 240)       // 項目
+  if (teachers.length > 0) {
+    dashboard.setColumnWidths(3, teachers.length, 36)
+    // 講師名ヘッダーを縦書き（文字は立てたまま縦に並ぶ）で省スペースに
+    dashboard.getRange(1, 3, 1, teachers.length)
+      .setVerticalText(true)
+      .setVerticalAlignment('top')
+    dashboard.setRowHeight(1, 130)
+  }
+
+  // 全体のフォント・縦中央寄せ
+  if (items.length > 0) {
+    dashboard.getRange(1, 1, items.length + 1, header.length)
+      .setVerticalAlignment('middle')
+      .setFontSize(11)
+  }
+
+  dashboard.setFrozenRows(1)
+  dashboard.setFrozenColumns(2)
+
+  // 凡例（最終行の下に追加）
+  const legendRow = items.length + 3
+  dashboard.getRange(legendRow, 1).setValue('【凡例】')
+  dashboard.getRange(legendRow + 1, 1).setValue('✓ = 確認')
+  dashboard.getRange(legendRow + 2, 1).setValue('🎉 = 完了（タスクのみ）')
+  dashboard.getRange(legendRow + 3, 1).setValue('（空欄）= 未確認')
+  dashboard.getRange(legendRow, 1, 4, 1).setFontColor('#666').setFontStyle('italic')
+
+  if (ui) ui.alert('✅ 更新完了', `「タスク確認状況」シートを再生成しました。\n項目: ${items.length}件 / 講師: ${teachers.length}名`, ui.ButtonSet.OK)
+  Logger.log(`updateTaskDashboard 完了: 項目${items.length}件 / 講師${teachers.length}名`)
+}
+
+// ============================================================
+//  お知らせ/タスクの確認・完了状態を更新（個人別）
+// ============================================================
+
+function updateItemStatus({ staffId, itemId, field, value }) {
+  if (!staffId || !itemId || !field) return { error: 'パラメータ不足' }
+  if (!['confirmed', 'completed'].includes(field)) return { error: '不正なフィールド' }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet()
+  let stateSheet = ss.getSheetByName('お知らせ状態')
+  if (!stateSheet) {
+    stateSheet = ss.insertSheet('お知らせ状態')
+    stateSheet.appendRow(['staffId', 'itemId', 'confirmed', 'completed', 'updatedAt'])
+    stateSheet.getRange(1, 1, 1, 5).setBackground('#1565C0').setFontColor('white').setFontWeight('bold')
+  }
+
+  const rows = stateSheet.getDataRange().getValues()
+  const now  = new Date()
+  let rowIdx = -1
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(staffId) && String(rows[i][1]) === String(itemId)) {
+      rowIdx = i + 1
+      break
+    }
+  }
+
+  if (rowIdx === -1) {
+    const confirmed = field === 'confirmed' ? !!value : false
+    const completed = field === 'completed' ? !!value : false
+    const finalConfirmed = (field === 'completed' && !!value) ? true : confirmed
+    stateSheet.appendRow([staffId, itemId, finalConfirmed, completed, now])
+  } else {
+    const colIdx = field === 'confirmed' ? 3 : 4
+    stateSheet.getRange(rowIdx, colIdx).setValue(!!value)
+    stateSheet.getRange(rowIdx, 5).setValue(now)
+    if (field === 'completed' && !!value) {
+      stateSheet.getRange(rowIdx, 3).setValue(true)
+    }
+  }
+
+  return { success: true }
+}
+
+// ============================================================
 //  打刻ログ保存
 // ============================================================
 
@@ -133,7 +552,7 @@ function saveAttendance({ staffId, name, type, timestamp, location, commuteLabel
     type === 'in' ? '出勤' : '退勤',
     date, time, lat, lng,
     commuteLabel || '', commuteAllowance || 0,
-    reason || '',
+    reason || '',  // K列：理由（後から手動追記も可）
   ])
 
   return { success: true, date, time }
@@ -176,6 +595,181 @@ function getClockHistory(staffId) {
 }
 
 // ============================================================
+//  アプリ用 勤務履歴取得（現在の締め期間）
+// ============================================================
+
+function getHistory(staffId) {
+  if (!staffId) return { records: [], period: '' }
+  const today = new Date()
+  const { start, end } = getClosingRange(today)
+
+  // 打刻ログから in/out を収集
+  const clockRows = getSheet(SHEET.CLOCK).getDataRange().getValues().slice(1)
+  const dayMap = {}   // { 'YYYY-MM-DD': { clockIn, clockOut } }
+  clockRows.forEach(row => {
+    const [, sid,, type, dateRaw, time] = row
+    const date = dateRaw instanceof Date ? formatDate(dateRaw) : String(dateRaw)
+    if (String(sid) !== String(staffId)) return
+    if (!isInRange(date, start, end)) return
+    if (!dayMap[date]) dayMap[date] = {}
+    const fmtTime = t => t instanceof Date
+      ? Utilities.formatDate(t, Session.getScriptTimeZone(), 'HH:mm')
+      : String(t)
+    if (type === '出勤') dayMap[date].clockIn  = fmtTime(time)
+    else                 dayMap[date].clockOut = fmtTime(time)
+  })
+
+  // 勤務記録ログから授業内容を収集
+  const recRows = getSheet(SHEET.RECORD).getDataRange().getValues().slice(1)
+  const lessonMap = {}  // { 'YYYY-MM-DD': { lines: [], V: 0 } }
+  recRows.forEach(row => {
+    const [, sid,, dateRaw, typeLabel, grade, target, amount,,,, V] = row
+    const date = dateRaw instanceof Date ? formatDate(dateRaw) : String(dateRaw)
+    if (String(sid) !== String(staffId)) return
+    if (!isInRange(date, start, end)) return
+    if (!lessonMap[date]) lessonMap[date] = { lines: [], V: 0 }
+    const gradeStr  = grade  ? `${grade}` : ''
+    const targetStr = target ? `/${target}` : ''
+    const amtStr    = amount ? `×${amount}` : ''
+    lessonMap[date].lines.push(`${typeLabel} ${gradeStr}${targetStr}${amtStr}`)
+    lessonMap[date].V = parseFloat(V) || lessonMap[date].V
+  })
+
+  // 両方をマージして表示用レコードを作成
+  const allDates = [...new Set([...Object.keys(dayMap), ...Object.keys(lessonMap)])].sort()
+  const fmtH = h => {
+    const hh = Math.floor(h)
+    const mm = Math.round((h - hh) * 60)
+    return mm > 0 ? `${hh}h${mm}m` : `${hh}h`
+  }
+
+  const records = allDates.map(date => {
+    const d  = dayMap[date]    || {}
+    const l  = lessonMap[date] || {}
+    const ymd = date.split('-')
+    const label = ymd.length === 3 ? `${parseInt(ymd[1])}/${parseInt(ymd[2])}` : date
+    return {
+      date    : label,
+      clockIn : d.clockIn  || '--:--',
+      clockOut: d.clockOut || '--:--',
+      lessons : l.lines?.join('、') || '',
+      total   : l.V > 0 ? fmtH(l.V) : '--',
+    }
+  })
+
+  // 期間ラベル（start/end は 'YYYY-MM-DD' 文字列）
+  const fmt = s => { const p = s.split('-'); return `${parseInt(p[1])}/${parseInt(p[2])}` }
+  const period = `${fmt(start)}〜${fmt(end)} の記録`
+
+  return { records, period }
+}
+
+// ============================================================
+//  お知らせ・タスク統合取得（お知らせシートから + 個人別状態をマージ）
+//
+//  シート構成:
+//    お知らせ       : [itemId, type, text, date, dueDate, expiry]
+//                     type = 'お知らせ' | 'タスク'
+//                     既存データ（type 空欄）は自動で「お知らせ」扱い
+//    お知らせ状態   : [staffId, itemId, confirmed, completed, updatedAt]
+// ============================================================
+
+function getItems(staffId) {
+  if (!staffId) return { items: [] }
+  const ss = SpreadsheetApp.getActiveSpreadsheet()
+
+  // メインシート
+  let sheet = ss.getSheetByName('お知らせ')
+  if (!sheet) {
+    sheet = ss.insertSheet('お知らせ')
+    sheet.appendRow(['itemId', 'type', 'text', 'date', 'dueDate', 'expiry'])
+    sheet.getRange(1, 1, 1, 6).setBackground('#1565C0').setFontColor('white').setFontWeight('bold')
+    return { items: [] }
+  }
+
+  // 状態シート（個人別）
+  let stateSheet = ss.getSheetByName('お知らせ状態')
+  if (!stateSheet) {
+    stateSheet = ss.insertSheet('お知らせ状態')
+    stateSheet.appendRow(['staffId', 'itemId', 'confirmed', 'completed', 'updatedAt'])
+    stateSheet.getRange(1, 1, 1, 5).setBackground('#1565C0').setFontColor('white').setFontWeight('bold')
+  }
+
+  // 個人状態をマップ化
+  const stateMap = {}
+  stateSheet.getDataRange().getValues().slice(1).forEach(r => {
+    if (String(r[0]) === String(staffId) && r[1]) {
+      stateMap[String(r[1])] = { confirmed: !!r[2], completed: !!r[3] }
+    }
+  })
+
+  const data = sheet.getDataRange().getValues()
+  if (data.length === 0) return { items: [] }
+
+  // ── ヘッダー名で列を解決（旧スキーマ [date, text, expiry] にも自動対応） ──
+  const header = data[0].map(h => String(h || '').trim())
+  const idx    = name => header.indexOf(name)
+  const iItem  = idx('itemId')
+  const iType  = idx('type')
+  const iText  = idx('text')
+  const iDate  = idx('date')
+  const iDue   = idx('dueDate')
+  const iExp   = idx('expiry')
+
+  // 旧スキーマ（text 列が無い）= [date, text, expiry] 構成
+  const isLegacy = iText === -1
+
+  const today = new Date()
+  const items = []
+  const fmtDate = v => v instanceof Date ? `${v.getMonth()+1}/${v.getDate()}` : (v ? String(v) : '')
+
+  data.slice(1).forEach((row, rowIdx) => {
+    let itemId, type, text, dateVal, dueDateVal, expiry
+
+    if (isLegacy) {
+      dateVal    = row[0]
+      text       = row[1]
+      expiry     = row[2]
+      itemId     = `legacy-${rowIdx}`
+      type       = 'お知らせ'
+      dueDateVal = ''
+    } else {
+      itemId     = (iItem >= 0 && row[iItem]) ? String(row[iItem]) : `legacy-${rowIdx}`
+      type       = (iType >= 0 && String(row[iType] || '').trim()) || 'お知らせ'
+      text       = iText >= 0 ? row[iText] : ''
+      dateVal    = iDate >= 0 ? row[iDate] : ''
+      dueDateVal = iDue  >= 0 ? row[iDue]  : ''
+      expiry     = iExp  >= 0 ? row[iExp]  : ''
+    }
+
+    if (!text) return
+    if (expiry instanceof Date && expiry < today) return
+
+    const st = stateMap[itemId] || { confirmed: false, completed: false }
+    items.push({
+      itemId,
+      type,
+      text   : String(text),
+      date   : fmtDate(dateVal),
+      dueDate: fmtDate(dueDateVal),
+      confirmed: st.confirmed,
+      completed: st.completed,
+    })
+  })
+
+  // 新しい順（最大20件）
+  return { items: items.slice(-20).reverse() }
+}
+
+// ============================================================
+//  互換用：旧 getNotices（バー表示などで使用）
+// ============================================================
+function getNotices() {
+  // 互換アダプタ：getItems から お知らせ のみ抽出
+  return { notices: [] }  // 旧呼び出し向けの空配列フォールバック
+}
+
+// ============================================================
 //  深夜バッチ（毎日3〜4時）
 //  ① 各先生シートに勤務記録をマッピング（AA列 交通費含む）
 //  ② 20日〆の翌日（21日）に月次バックアップ作成 + Excel メール送信
@@ -189,8 +783,14 @@ function nightlyBatch() {
   // ── 打刻ログ読み込み ──
   const clockRows = getSheet(SHEET.CLOCK).getDataRange().getValues().slice(1)
   const clockMap  = {}  // { staffId: { date: { in, out, commuteLabel, commuteAllowance } } }
+  const fmtTime = t => t instanceof Date
+    ? Utilities.formatDate(t, 'Asia/Tokyo', 'HH:mm')
+    : String(t)
+
   clockRows.forEach(row => {
-    const [, staffId,, type, date, time,,, commuteLabel, commuteAllowance, reason] = row
+    const [, staffId,, type, dateRaw, timeRaw,,, commuteLabel, commuteAllowance, reason] = row
+    const date = dateRaw instanceof Date ? formatDate(dateRaw) : String(dateRaw)
+    const time = fmtTime(timeRaw)
     if (!isInRange(date, start, end)) return
     if (!clockMap[staffId])        clockMap[staffId] = {}
     if (!clockMap[staffId][date])  clockMap[staffId][date] = {}
@@ -200,7 +800,7 @@ function nightlyBatch() {
       clockMap[staffId][date].commuteAllowance = commuteAllowance || 0
     } else {
       clockMap[staffId][date].out    = time
-      clockMap[staffId][date].reason = reason || ''
+      clockMap[staffId][date].reason = reason || ''  // K列：理由
     }
   })
 
@@ -209,7 +809,8 @@ function nightlyBatch() {
   const recMap  = {}   // { staffId: { date: { col: 合計値 } } }
   const vMap    = {}   // { staffId: { date: V合計(h) } }
   recRows.forEach(row => {
-    const [, staffId,, date, typeLabel, grade,, amount,,,, V] = row
+    const [, staffId,, dateRaw, typeLabel, grade,, amount,,,, V] = row
+    const date = dateRaw instanceof Date ? formatDate(dateRaw) : String(dateRaw)
     if (!isInRange(date, start, end)) return
     if (!recMap[staffId])       recMap[staffId] = {}
     if (!recMap[staffId][date]) recMap[staffId][date] = {}
@@ -250,6 +851,7 @@ function nightlyBatch() {
       staffSheet.setName(name)
       const dayCount = Math.round((new Date(end) - new Date(start)) / 86400000) + 1
       fillStaffSheet(staffSheet, name, grade, new Date(start), dayCount, rateData, rateHeaders)
+      protectStaffSheet(staffSheet)
       Logger.log(`新規講師シート自動作成: ${name}（${start}〜${end}）`)
     }
 
@@ -291,7 +893,9 @@ function nightlyBatch() {
       if (reason) staffSheet.getRange(i + 1, 28).setValue(reason)
 
       // Z異常チェック（V>0 かつ Z<-0.25 または Z>=1）
-      if (V > 0 && (Z < -0.25 || Z >= 1)) {
+      // ただし打刻ログAB列（備考欄）に理由が記入されていればOK → エラー除外
+      const hasReason = !!(clock.reason)
+      if (V > 0 && !hasReason && (Z < -0.25 || Z >= 1)) {
         zErrors.push({ name, date, V: V.toFixed(2), Y: Y.toFixed(2), Z: Z.toFixed(2) })
       }
     }
@@ -320,7 +924,212 @@ function nightlyBatch() {
     sendAdminMail(subject, body)
   }
 
+  // ── Z異常行をログにハイライト ──
+  highlightZErrors(ss, zErrors)
+
+  // ── 総支給額シート更新 ──
+  updateSougouSheet(ss, masters)
+
+  // ── シート順を整列（講師マスタ順で先頭に）──
+  reorderSheets(ss, masters)
+
+  // ── タスク確認状況ダッシュボードを更新（前日までの状態をスナップショット）──
+  try {
+    updateTaskDashboard()
+  } catch (e) {
+    Logger.log(`updateTaskDashboard エラー: ${e.message}`)
+  }
+
   Logger.log(`バッチ完了: ${zErrors.length}件の異常`)
+}
+
+// ============================================================
+//  シート並び替え（講師マスタ順で先生シートを先頭に）
+// ============================================================
+
+// ============================================================
+//  総支給額シート更新
+// ============================================================
+
+// ============================================================
+//  Z異常行をログにオレンジでハイライト（修正済みは自動解除）
+// ============================================================
+
+function highlightZErrors(ss, zErrors) {
+  const clockSheet = getSheet(SHEET.CLOCK)
+  const recSheet   = getSheet(SHEET.RECORD)
+  const COLOR      = '#FFB347'  // オレンジ
+
+  // ── 前回のハイライトをクリア ──
+  const clearHighlight = sheet => {
+    const lastRow = sheet.getLastRow()
+    if (lastRow >= 2) sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).setBackground(null)
+  }
+  clearHighlight(clockSheet)
+  clearHighlight(recSheet)
+
+  if (zErrors.length === 0) { Logger.log('Z異常なし・ハイライトクリア完了'); return }
+
+  // name_date のセットを作成
+  const errorKeys = new Set(zErrors.map(e => e.name + '_' + e.date))
+
+  // 打刻ログをハイライト
+  clockSheet.getDataRange().getValues().forEach(function(row, i) {
+    if (i === 0) return
+    const name    = String(row[2])
+    const dateRaw = row[4]
+    const date    = dateRaw instanceof Date ? formatDate(dateRaw) : String(dateRaw)
+    if (errorKeys.has(name + '_' + date)) {
+      clockSheet.getRange(i + 1, 1, 1, clockSheet.getLastColumn()).setBackground(COLOR)
+    }
+  })
+
+  // 勤務記録ログをハイライト
+  recSheet.getDataRange().getValues().forEach(function(row, i) {
+    if (i === 0) return
+    const name    = String(row[2])
+    const dateRaw = row[3]
+    const date    = dateRaw instanceof Date ? formatDate(dateRaw) : String(dateRaw)
+    if (errorKeys.has(name + '_' + date)) {
+      recSheet.getRange(i + 1, 1, 1, recSheet.getLastColumn()).setBackground(COLOR)
+    }
+  })
+
+  Logger.log('Z異常ハイライト完了（' + zErrors.length + '件）')
+}
+
+// ============================================================
+//  総支給額シート更新
+// ============================================================
+
+function updateSougouSheet(ss, masters) {
+  const sougSheet = ss.getSheetByName('総支給額')
+  if (!sougSheet) { Logger.log('総支給額シートが見つかりません'); return }
+
+  // ── A1・A2・A4：期間ヘッダを更新 ──
+  const { start, end } = getClosingRange(new Date())
+  const startDate = new Date(start)
+  const endDate   = new Date(end)
+  const toJP = d => `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`
+  sougSheet.getRange('A1').setValue(`${endDate.getFullYear()}年${endDate.getMonth()+1}月分`)
+  sougSheet.getRange('A2').setValue('開始日')
+  sougSheet.getRange('A3').setValue(toJP(startDate))
+  sougSheet.getRange('A4').setValue('終了日')
+  sougSheet.getRange('A5').setValue(toJP(endDate))
+
+  const DATA_START = 2  // 2行目からデータ
+
+  // ── F列(弥生用数式)・H列(ボーナス)・I列(調整)の既存値を保持 ──
+  const bonusMap = {}, adjustMap = {}, fFormulaMap = {}
+  const lastRow = sougSheet.getLastRow()
+  if (lastRow >= DATA_START) {
+    const rowCount = lastRow - DATA_START + 1
+    const vals     = sougSheet.getRange(DATA_START, 2, rowCount, 8).getValues()
+    const fFormulas = sougSheet.getRange(DATA_START, 6, rowCount, 1).getFormulas()
+    vals.forEach((row, i) => {
+      const name = String(row[0])
+      if (name && name !== '合計') {
+        bonusMap[name]    = row[6] || 0       // H列
+        adjustMap[name]   = row[7] || 0       // I列
+        fFormulaMap[name] = fFormulas[i][0] || ''  // F列の数式
+      }
+    })
+    sougSheet.getRange(DATA_START, 2, rowCount, 12).clearContent()
+  }
+
+  // ── 各講師データ収集 ──
+  const staffList = []
+  masters.forEach(master => {
+    const name  = master[2]
+    const grade = master[3]
+    if (!name) return
+    const staffSheet = ss.getSheetByName(name)
+    let v33 = 0, d36 = 0, g36 = 0, j36 = 0, l36 = 0
+    if (staffSheet) {
+      v33 = staffSheet.getRange(SUM_ROW,  22).getValue() || 0  // V33: 勤務時間合計
+      d36 = staffSheet.getRange(CALC_ROW, 22).getValue() || 0  // V36: 出勤数
+      g36 = staffSheet.getRange(CALC_ROW, 23).getValue() || 0  // W36: チーフ手当
+      j36 = staffSheet.getRange(CALC_ROW, 20).getValue() || 0  // T36: 授業給計
+      l36 = staffSheet.getRange(CALC_ROW, 21).getValue() || 0  // U36: 交通費
+    }
+    staffList.push({
+      name, grade,
+      d: d36,
+      e: v33,
+      // f列（弥生用）はシートの数式で計算
+      g: g36,
+      h: bonusMap[name]  || 0,
+      i: adjustMap[name] || 0,
+      j: j36,
+      l: l36,
+    })
+  })
+
+  // ── シートに書き込み（F列はシート数式のためスキップ）──
+  staffList.forEach((d, idx) => {
+    const row = DATA_START + idx
+    // B〜E列（講師名・グレード・勤務日数・勤務時間）
+    sougSheet.getRange(row, 2, 1, 4).setValues([[d.name, d.grade, d.d, d.e]])
+    // F列：弥生用（ユーザー入力の数式を復元）
+    const fFormula = fFormulaMap[d.name] || ''
+    if (fFormula) sougSheet.getRange(row, 6).setFormula(fFormula)
+    // G〜J列（チーフ手当・ボーナス・調整・授業給計）
+    sougSheet.getRange(row, 7, 1, 4).setValues([[d.g, d.h, d.i, d.j]])
+    // K列: 数式
+    sougSheet.getRange(row, 11).setFormula(`=G${row}+H${row}+I${row}+J${row}`)
+    // L列: 交通費
+    sougSheet.getRange(row, 12).setValue(d.l)
+    // M列: 数式
+    sougSheet.getRange(row, 13).setFormula(`=K${row}+L${row}`)
+  })
+
+  // E列を [h]:mm 形式で表示
+  if (staffList.length > 0) {
+    sougSheet.getRange(DATA_START, 5, staffList.length, 1).setNumberFormat('[h]:mm')
+  }
+
+  // ── 合計行 ──
+  if (staffList.length === 0) { Logger.log('講師データなし'); return }
+  const sumRow      = DATA_START + staffList.length
+  const lastDataRow = sumRow - 1
+  sougSheet.getRange(sumRow, 2).setValue('合計')
+  const sumCols = ['D','E','G','H','I','J','K','L','M']  // F列はシート数式
+  const colNums = {'D':4,'E':5,'G':7,'H':8,'I':9,'J':10,'K':11,'L':12,'M':13}
+  sumCols.forEach(function(col) {
+    sougSheet.getRange(sumRow, colNums[col]).setFormula('=SUM(' + col + DATA_START + ':' + col + lastDataRow + ')')
+  })
+  sougSheet.getRange(sumRow, 5).setNumberFormat('[h]:mm')
+  sougSheet.getRange(sumRow, 2, 1, 12).setBackground('#FFFF00').setFontWeight('bold')
+
+  Logger.log(`総支給額シート更新完了（${staffList.length}名）`)
+}
+
+// ============================================================
+//  シート並び替え（講師マスタ順で先生シートを先頭に）
+// ============================================================
+
+function reorderSheets(ss, masters) {
+  const FIXED = [SHEET.MASTER, SHEET.ADMIN, SHEET.CLOCK, SHEET.RECORD,
+                 '給与履歴', SHEET.RATE, 'テンプレート', 'お知らせ']
+  const staffNames = masters.map(r => r[2]).filter(name => name && !FIXED.includes(name) && name !== '総支給額')
+
+  let position = 1
+
+  // 1番目：総支給額
+  const sougSheet = ss.getSheetByName('総支給額')
+  if (sougSheet) {
+    ss.setActiveSheet(sougSheet)
+    ss.moveActiveSheet(position++)
+  }
+
+  // 2番目以降：講師シート（講師マスタ順）
+  staffNames.forEach(name => {
+    const sheet = ss.getSheetByName(name)
+    if (!sheet) return
+    ss.setActiveSheet(sheet)
+    ss.moveActiveSheet(position++)
+  })
+  Logger.log(`シート順整列完了（総支給額 + 講師${position - 2}名）`)
 }
 
 // ============================================================
@@ -408,7 +1217,7 @@ function monthlyBackup(ss, endDate) {
       GmailApp.sendEmail(
         row[1],
         `【${label}】アルバイト明細`,
-        `${label}のアルバイト明細をお送りします。\n\nご確認をよろしくお願いいたします。`,
+        `本社 経理部 御中\n\nおつかれさまです。\n\n${label}のアルバイト明細をお送りします。\n\nご確認をよろしくお願いいたします。`,
         { attachments: [xlsxBlob] }
       )
       Logger.log(`Excel送信: ${row[1]}`)
@@ -494,6 +1303,7 @@ function autoMonthlyUpdate(ss, today) {
       staffSheet.setName(name)
     }
     fillStaffSheet(staffSheet, name, grade, periodStart, dayCount, rateData, rateHeaders)
+    protectStaffSheet(staffSheet)
   })
 
   const startLabel = Utilities.formatDate(periodStart, 'Asia/Tokyo', 'M/d')
@@ -511,6 +1321,21 @@ function monthlyUpdate() {
   const today = new Date()
   autoMonthlyUpdate(ss, today)
   SpreadsheetApp.getUi().alert('月次更新が完了しました！\n（ログは履歴として保持）')
+}
+
+// ============================================================
+//  講師シート保護（B2:AB36 を手動編集禁止）
+// ============================================================
+
+function protectStaffSheet(sheet) {
+  // 既存の保護をすべて解除してから再設定
+  sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach(p => p.remove())
+
+  const protection = sheet.getRange('B2:AB36').protect()
+  protection.setDescription('GAS管理エリア（手動編集禁止）')
+  // 自分（スクリプトオーナー）のみ編集可能・それ以外は警告
+  protection.setWarningOnly(false)
+  Logger.log(`シート保護設定: ${sheet.getName()}`)
 }
 
 // ============================================================
@@ -546,9 +1371,10 @@ function fillStaffSheet(sheet, staffName, grade, periodStart, dayCount, rateData
   dateRange.setNumberFormat('M/d(ddd)')
 
   // ── 35行目：コマ単価（グレード時給表から転記）──
-  const gradeColIdx = rateHeaders.indexOf(grade)  // 0始まりのインデックス
+  // 社員グレードは時給表不要のためスキップ
+  const gradeColIdx = rateHeaders.indexOf(grade)
   if (gradeColIdx < 0) {
-    Logger.log(`グレード "${grade}" が時給表に見つかりません（${staffName}）`)
+    if (grade !== '社員') Logger.log(`グレード "${grade}" が時給表に見つかりません（${staffName}）`)
   } else {
     Object.entries(RATE_LABEL).forEach(([staffColStr, rateLabel]) => {
       const staffCol   = parseInt(staffColStr)
@@ -710,6 +1536,11 @@ function setupSheets() {
       headers: ['名前', 'メールアドレス', '有効'],
       color  : '#1565C0',
     },
+    {
+      name   : 'お知らせ',
+      headers: ['日付', '内容', '掲載終了日'],
+      color  : '#FF9800',
+    },
   ]
 
   config.forEach(({ name, headers, color }) => {
@@ -726,4 +1557,215 @@ function setupSheets() {
   })
 
   Logger.log('セットアップ完了！')
+}
+
+// ============================================================
+//  22:30 リマインド（入室あり・退室 or 勤務記録なし の講師に通知）
+// ============================================================
+
+function eveningReminder() {
+  const today = formatDate(new Date())
+
+  // ── 今日入室した人を収集 ──
+  const clockRows = getSheet(SHEET.CLOCK).getDataRange().getValues().slice(1)
+  const staffStatus = {}  // { staffId: { hasIn, hasOut } }
+  clockRows.forEach(row => {
+    const [, staffId,, type, dateRaw] = row
+    const date = dateRaw instanceof Date ? formatDate(dateRaw) : String(dateRaw)
+    if (date !== today) return
+    if (!staffStatus[staffId]) staffStatus[staffId] = { hasIn: false, hasOut: false }
+    if (type === '出勤') staffStatus[staffId].hasIn  = true
+    if (type === '退勤') staffStatus[staffId].hasOut = true
+  })
+
+  // ── 今日勤務記録がある人を収集 ──
+  const recRows = getSheet(SHEET.RECORD).getDataRange().getValues().slice(1)
+  recRows.forEach(row => {
+    const [, staffId,, dateRaw] = row
+    const date = dateRaw instanceof Date ? formatDate(dateRaw) : String(dateRaw)
+    if (date !== today) return
+    if (staffStatus[staffId]) staffStatus[staffId].hasRecord = true
+  })
+
+  // ── 講師マスタから LINE ID を取得 ──
+  const lineIdMap = {}  // { staffId: lineUserId }
+  getSheet(SHEET.MASTER).getDataRange().getValues().slice(1).forEach(r => {
+    if (r[0] && r[1]) lineIdMap[String(r[1])] = String(r[0])
+  })
+
+  // ── 入室あり・退室 or 勤務記録なし の人に通知 ──
+  let count = 0
+  Object.entries(staffStatus).forEach(([staffId, s]) => {
+    if (!s.hasIn) return   // 入室なし → スキップ
+    if (s.hasOut)  return  // 退室あり → 正常完了
+
+    const lineUserId = lineIdMap[staffId]
+    if (!lineUserId) return
+
+    let msg = '【中谷塾 西明石】\n'
+    if (!s.hasRecord) {
+      msg += '勤務記録と退室打刻を入力してください🙏'  // 記録も退室もなし
+    } else {
+      msg += '退室打刻を入力してください🙏'            // 記録あり・退室なし
+    }
+
+    sendLinePush(lineUserId, msg)
+    count++
+  })
+
+  Logger.log(`22:30リマインド送信: ${count}件`)
+}
+
+// LINE push通知送信
+function sendLinePush(lineUserId, message) {
+  const token = PropertiesService.getScriptProperties().getProperty('LINE_CHANNEL_TOKEN')
+  if (!token) { Logger.log('LINEチャンネルトークン未設定'); return }
+
+  UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
+    method  : 'post',
+    headers : {
+      'Content-Type' : 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    payload : JSON.stringify({
+      to      : lineUserId,
+      messages: [{ type: 'text', text: message }],
+    }),
+  })
+  Logger.log(`LINE push送信: ${lineUserId}`)
+}
+
+// LINEチャンネルアクセストークンを登録（メニューから実行）
+function promptLineChannelToken() {
+  const ui  = SpreadsheetApp.getUi()
+  const res = ui.prompt(
+    '🔑 LINEトークン登録',
+    'LINE Messaging API のチャンネルアクセストークンを貼り付けてください：',
+    ui.ButtonSet.OK_CANCEL
+  )
+  if (res.getSelectedButton() !== ui.Button.OK) return
+  const token = res.getResponseText().trim()
+  if (!token) { ui.alert('トークンが空です'); return }
+  PropertiesService.getScriptProperties().setProperty('LINE_CHANNEL_TOKEN', token)
+  ui.alert('✅ 登録完了！\nリマインドトリガーも設定してください。')
+}
+
+// 22:30トリガーを設定（メニューから一度だけ実行）
+function setupEveningReminderTrigger() {
+  // 既存のリマインドトリガーを削除
+  ScriptApp.getProjectTriggers()
+    .filter(t => t.getHandlerFunction() === 'eveningReminder')
+    .forEach(t => ScriptApp.deleteTrigger(t))
+
+  // 毎日 22:30 に設定
+  ScriptApp.newTrigger('eveningReminder')
+    .timeBased()
+    .atHour(22)
+    .nearMinute(30)
+    .everyDays(1)
+    .create()
+
+  SpreadsheetApp.getUi().alert('✅ 22:30リマインドトリガーを設定しました！')
+  Logger.log('eveningReminderトリガー設定完了')
+}
+
+// ============================================================
+//  テスト関数（開発・確認用）
+// ============================================================
+
+function testNightlyBatch() {
+  nightlyBatch()
+}
+
+// 21日〆テスト：前月21日〜今月20日を「締め済み」として月次処理を実行
+function testMonthlyProcess() {
+  const ss      = SpreadsheetApp.getActiveSpreadsheet()
+  const today   = new Date()
+
+  // 前の締め期間（先月21日〜今月20日）
+  const prevEnd   = new Date(today.getFullYear(), today.getMonth(), 20)
+  const prevStart = new Date(today.getFullYear(), today.getMonth() - 1, 21)
+
+  Logger.log('=== 月次処理テスト開始 ===')
+  Logger.log(`対象期間: ${formatDate(prevStart)} 〜 ${formatDate(prevEnd)}`)
+
+  // ① 給与履歴に記録
+  const masters = getSheet(SHEET.MASTER).getDataRange().getValues().slice(1)
+  recordPayrollHistory(ss, masters, prevStart, prevEnd)
+
+  // ② 月次バックアップ（Excelメール送信）
+  monthlyBackup(ss, prevEnd)
+
+  // ③ 翌期間の講師シートをリセット・再作成
+  autoMonthlyUpdate(ss, new Date(today.getFullYear(), today.getMonth(), 21))
+
+  Logger.log('=== 月次処理テスト完了 ===')
+}
+
+// 三方哲郎のテストデータ作成（打刻・勤務記録・給与履歴 各10件）
+function createTestDataSanpo() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet()
+
+  // 講師マスタから三方哲郎の情報を取得
+  const masterRows = getSheet(SHEET.MASTER).getDataRange().getValues()
+  const sanpoRow   = masterRows.find(r => r[2] === '三方哲郎')
+  if (!sanpoRow) { Logger.log('三方哲郎が講師マスタに見つかりません'); return }
+  const staffId = sanpoRow[1]
+  const grade   = sanpoRow[3]
+  Logger.log(`三方哲郎 staffId: ${staffId} grade: ${grade}`)
+
+  // ── 打刻ログ（5日分 × 出勤・退勤 = 10件）現在の締め期間内 ──
+  const clockSheet = getSheet(SHEET.CLOCK)
+  const workDays = [
+    { date: '2026-04-22', in: '14:00', out: '20:30' },
+    { date: '2026-04-24', in: '15:00', out: '21:00' },
+    { date: '2026-04-26', in: '14:30', out: '20:00' },
+    { date: '2026-04-28', in: '15:00', out: '21:30' },
+    { date: '2026-04-30', in: '14:00', out: '20:30' },
+  ]
+  workDays.forEach(d => {
+    clockSheet.appendRow([new Date(), staffId, '三方哲郎', '出勤', d.date, d.in, '', '', '自転車', 0, ''])
+    clockSheet.appendRow([new Date(), staffId, '三方哲郎', '退勤', d.date, d.out, '', '', '自転車', 0, ''])
+  })
+  Logger.log('打刻ログ 10件 追加完了')
+
+  // ── 勤務記録ログ（10件）──
+  const recSheet = getSheet(SHEET.RECORD)
+  const lessons = [
+    { date: '2026-04-22', type: 'MM 1:1',          grade: '中学生', target: '山田 一郎', amount: 1,    unit: 'コマ', V: 2.33 },
+    { date: '2026-04-22', type: '自立',              grade: '高校生', target: '',         amount: 1,    unit: 'h',   V: 2.33 },
+    { date: '2026-04-24', type: 'MM 1:1',          grade: '小学生', target: '田中 花子', amount: 1,    unit: 'コマ', V: 2.67 },
+    { date: '2026-04-24', type: '一斉少人数(1〜8名)', grade: '中学生', target: '中2A数学', amount: 1.5,  unit: 'h',   V: 2.67 },
+    { date: '2026-04-26', type: 'MM 1:2',          grade: '中学生', target: '佐藤 次郎', amount: 1,    unit: 'コマ', V: 2.33 },
+    { date: '2026-04-26', type: '補習 or 事務',     grade: '',       target: '',         amount: 0.25, unit: 'h',   V: 2.33 },
+    { date: '2026-04-28', type: 'MM 1:1',          grade: '高校生', target: '鈴木 三郎', amount: 2,    unit: 'コマ', V: 3.67 },
+    { date: '2026-04-28', type: '自立',              grade: '中学生', target: '',         amount: 1,    unit: 'h',   V: 3.67 },
+    { date: '2026-04-30', type: 'MM 1:1',          grade: '中学生', target: '高橋 四郎', amount: 1,    unit: 'コマ', V: 2.33 },
+    { date: '2026-04-30', type: '一斉少人数(1〜8名)', grade: '高校生', target: '高3B英語', amount: 1.5,  unit: 'h',   V: 2.33 },
+  ]
+  lessons.forEach(l => {
+    recSheet.appendRow([
+      new Date(), staffId, '三方哲郎', l.date,
+      l.type, l.grade, l.target, l.amount, l.unit,
+      workDays.find(d => d.date === l.date)?.in || '',
+      workDays.find(d => d.date === l.date)?.out || '',
+      l.V,
+    ])
+  })
+  Logger.log('勤務記録ログ 10件 追加完了')
+
+  // ── 給与履歴（過去3ヶ月分）──
+  const histSheet = ss.getSheetByName('給与履歴')
+  if (!histSheet) { Logger.log('給与履歴シートが見つかりません'); return }
+  const history = [
+    { start: '2025/11/21', end: '2025/12/20', lesson: 18500, transport: 0, chief: 0, total: 18500, days: 8  },
+    { start: '2025/12/21', end: '2026/1/20',  lesson: 22000, transport: 0, chief: 0, total: 22000, days: 10 },
+    { start: '2026/1/21',  end: '2026/2/20',  lesson: 19800, transport: 0, chief: 0, total: 19800, days: 9  },
+  ]
+  history.forEach(h => {
+    histSheet.appendRow([h.start, h.end, staffId, '三方哲郎', grade, h.lesson, h.transport, h.chief, h.total, h.days, new Date()])
+  })
+  Logger.log('給与履歴 3件 追加完了')
+
+  Logger.log('=== 三方哲郎テストデータ作成完了 ===')
 }

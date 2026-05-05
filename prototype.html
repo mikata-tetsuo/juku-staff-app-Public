@@ -31,52 +31,408 @@
     <p class="text-gray-500 text-sm">LINEアカウントを確認中...</p>
   </div>
 
-  <!-- 入室画面 -->
-  <div id="screen-clock" class="screen h-full overflow-hidden">
-    <!-- ヘッダー -->
-    <div class="bg-[#06C755] text-white px-4 pt-10 pb-6 flex-shrink-0">
-      <div class="flex items-center gap-3 mb-3">
-        <div id="avatar" class="w-11 h-11 rounded-full bg-white/30 flex items-center justify-center text-xl font-bold">田</div>
-        <div>
-          <p class="text-sm opacity-75">こんにちは</p>
+  <!-- ホーム画面 -->
+  <div id="screen-home" class="screen h-full overflow-hidden">
+    <div class="bg-[#06C755] text-white px-4 pt-10 pb-4 flex-shrink-0">
+      <div class="flex items-center gap-3">
+        <div id="avatar" class="w-11 h-11 rounded-full bg-white/30 flex items-center justify-center text-xl font-bold flex-shrink-0">田</div>
+        <div class="flex-1 min-w-0">
           <p class="font-bold text-lg leading-tight" id="staff-name">田中 花子 先生</p>
+          <p class="text-sm opacity-80">こんにちは！お疲れ様です 🌟</p>
         </div>
+        <p class="text-lg font-mono font-semibold opacity-90 flex-shrink-0" id="clock-display"></p>
       </div>
-      <p class="text-sm opacity-75" id="header-date"></p>
+      <p class="text-xs opacity-70 mt-2" id="header-date"></p>
     </div>
 
-    <!-- コンテンツ -->
-    <div class="flex-1 overflow-y-auto px-4 py-5 space-y-4">
-      <!-- 時計 -->
-      <div class="bg-white rounded-2xl shadow-sm p-5 text-center">
-        <p id="clock-display" class="text-5xl font-mono font-bold text-gray-800 tracking-wider"></p>
-        <p class="text-xs text-gray-400 mt-1">現在時刻</p>
-      </div>
-
-      <!-- 通勤手段 -->
-      <div id="commute-area" class="bg-white rounded-2xl shadow-sm p-4">
-        <p class="text-sm font-semibold text-gray-600 mb-2">通勤手段</p>
-        <div id="commute-options" class="flex gap-2 flex-wrap"></div>
-      </div>
-
-      <!-- 入室ボタン -->
-      <div id="btn-area">
-        <button id="btn-clock-in"
-          class="w-full py-5 bg-[#06C755] text-white text-xl font-bold rounded-2xl shadow-md active:scale-95 transition-transform">
-          🟢 入室する
+    <div class="flex-1 overflow-y-auto px-4 py-4 space-y-3 pb-32">
+      <!-- お知らせ・タスク 集約カード（常時表示、状態で見た目変化） -->
+      <div id="home-urgent" class="bg-amber-50 border-2 border-amber-300 rounded-2xl shadow-sm p-3">
+        <p class="text-sm font-bold text-gray-800 mb-2">
+          <span id="home-urgent-title-icon">⚠️</span>
+          <span id="home-urgent-title">確認が必要</span>
+        </p>
+        <div id="home-urgent-list" class="space-y-1"></div>
+        <button onclick="showTab('notice')"
+          class="w-full text-xs text-[#06C755] font-semibold py-2 mt-2 border-t border-amber-200 active:bg-amber-100">
+          📋 すべてのお知らせを見る →
         </button>
       </div>
 
-      <!-- 担当科目 -->
-      <div class="bg-white rounded-2xl shadow-sm p-4">
-        <p class="text-sm font-semibold text-gray-600 mb-2">担当科目</p>
-        <div class="flex flex-wrap gap-2">
-          <span class="bg-green-100 text-green-700 text-sm font-medium px-3 py-1 rounded-full">数学</span>
-          <span class="bg-green-100 text-green-700 text-sm font-medium px-3 py-1 rounded-full">英語</span>
+      <!-- 入室前モード（5ステッププレビュー：研修にも使える） -->
+      <div id="home-mode-before" class="space-y-2">
+        <!-- ① 入室 [いま] -->
+        <div class="bg-white rounded-2xl shadow-sm p-4 border-l-4 border-[#06C755]">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="bg-[#06C755] text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center flex-shrink-0">1</span>
+            <span class="text-sm font-bold text-gray-700">入室</span>
+            <span class="text-xs font-bold text-[#06C755] ml-auto bg-green-100 px-2 py-0.5 rounded-full">いま</span>
+          </div>
+          <div id="commute-area" class="mb-3">
+            <p class="text-xs font-semibold text-gray-600 mb-2">通勤手段</p>
+            <div id="commute-options" class="flex gap-2 flex-wrap"></div>
+          </div>
+          <button id="btn-clock-in"
+            class="w-full py-4 bg-[#06C755] text-white text-lg font-bold rounded-xl shadow active:scale-95 transition-transform">
+            🟢 入室する
+          </button>
+        </div>
+
+        <!-- ② 授業（プレビュー） -->
+        <div class="text-center text-gray-300 text-xl leading-none pt-1">↓</div>
+        <div class="bg-white rounded-2xl shadow-sm p-4 border-l-4 border-gray-300 opacity-70">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="bg-gray-400 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center flex-shrink-0">2</span>
+            <span class="text-sm font-bold text-gray-700">授業</span>
+          </div>
+          <p class="text-xs text-gray-500 ml-8">📲 最小化して授業へ。LINEからいつでも戻れます。</p>
+        </div>
+
+        <!-- ③ 報告（プレビュー） -->
+        <div class="text-center text-gray-300 text-xl leading-none pt-1">↓</div>
+        <div class="bg-white rounded-2xl shadow-sm p-4 border-l-4 border-gray-300 opacity-70">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="bg-gray-400 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center flex-shrink-0">3</span>
+            <span class="text-sm font-bold text-gray-700">comiru記入、社員へ報告</span>
+          </div>
+          <p class="text-xs text-gray-500 ml-8 leading-relaxed">
+            📝 comiru報告書記入<br/>
+            👥 社員へ報告<br/>
+            🧹 22:00まで授業の先生は一緒にそうじ
+          </p>
+        </div>
+
+        <!-- ④ 勤務記録（プレビュー・鍵） -->
+        <div class="text-center text-gray-300 text-xl leading-none pt-1">↓</div>
+        <div class="bg-white rounded-2xl shadow-sm p-4 border-l-4 border-gray-300 opacity-70">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="bg-gray-400 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center flex-shrink-0">4</span>
+            <span class="text-sm font-bold text-gray-800">勤務記録入力</span>
+            <span class="text-xs ml-auto">🔒</span>
+          </div>
+          <p class="text-xs text-gray-500 ml-8">入室後にできるようになります</p>
+        </div>
+
+        <!-- ⑤ 退室（プレビュー・鍵） -->
+        <div class="text-center text-gray-300 text-xl leading-none pt-1">↓</div>
+        <div class="bg-white rounded-2xl shadow-sm p-4 border-l-4 border-gray-300 opacity-70">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="bg-gray-400 text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center flex-shrink-0">5</span>
+            <span class="text-sm font-bold text-gray-800">退室</span>
+            <span class="text-xs ml-auto">🔒</span>
+          </div>
+          <p class="text-xs text-gray-500 ml-8">勤務記録の送信後にできます</p>
+        </div>
+      </div>
+
+      <!-- 授業中モード（入室後・記録未送信） -->
+      <div id="home-mode-during" class="hidden space-y-2">
+        <!-- ① 入室（完了：グレー） -->
+        <div class="bg-gray-200 rounded-2xl shadow-sm p-4 border-l-4 border-[#06C755]">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="bg-[#06C755] text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center flex-shrink-0">1</span>
+            <span class="text-sm font-bold text-gray-700">入室</span>
+            <span class="text-xs font-bold text-[#06C755] ml-auto">✅ 完了</span>
+          </div>
+          <p class="text-sm text-gray-700 ml-8">
+            <span id="home-clock-in-time">--:--</span> 入室・<span id="home-elapsed">--</span>経過
+          </p>
+        </div>
+
+        <!-- ② 授業（いま：緑bg） -->
+        <div class="text-center text-gray-300 text-xl leading-none pt-1">↓</div>
+        <div class="bg-green-50 rounded-2xl shadow-sm p-4 border-l-4 border-[#06C755]">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="bg-[#06C755] text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center flex-shrink-0">2</span>
+            <span class="text-sm font-bold text-gray-700">授業</span>
+            <span class="text-xs font-bold text-[#06C755] ml-auto bg-green-100 px-2 py-0.5 rounded-full">いま</span>
+          </div>
+          <button id="btn-minimize"
+            class="w-full py-3 bg-[#06C755] text-white font-bold rounded-xl shadow active:scale-95 transition-transform">
+            📲 最小化(LINEを閉じる)
+          </button>
+          <p class="text-xs text-gray-500 mt-2 text-center leading-relaxed">
+            授業を行ってください。<br/>LINEからいつでも戻れます。
+          </p>
+        </div>
+
+        <!-- ③ comiru記入、社員へ報告（白bg） -->
+        <div class="text-center text-gray-300 text-xl leading-none pt-1">↓</div>
+        <div class="bg-white rounded-2xl shadow-sm p-4 border-l-4 border-[#06C755]">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="bg-[#06C755] text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center flex-shrink-0">3</span>
+            <span class="text-sm font-bold text-gray-700">comiru記入、社員へ報告</span>
+          </div>
+          <p class="text-sm text-gray-700 leading-relaxed ml-8">
+            📝 comiru報告書を記入<br/>
+            👥 社員へ報告
+          </p>
+          <div class="mt-3 ml-8 pt-2 border-t border-gray-200">
+            <p class="text-xs text-gray-700 leading-relaxed">
+              🧹 22:00まで授業の先生は一緒にそうじを手伝ってください！<br/>
+              <span class="text-gray-500">（毎週月・木、ゴミ出し）</span><br/>
+              <span class="text-[#06C755] font-semibold">事務 0.25h つけてね</span>
+            </p>
+          </div>
+        </div>
+
+        <!-- ④ 勤務記録入力（アクティブ） -->
+        <div class="text-center text-gray-300 text-xl leading-none pt-1">↓</div>
+        <div class="bg-white rounded-2xl shadow-sm p-4 border-l-4 border-[#06C755]">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="bg-[#06C755] text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center flex-shrink-0">4</span>
+            <span class="text-sm font-bold text-gray-800">勤務記録入力</span>
+          </div>
+          <button id="btn-go-report"
+            class="w-full py-4 bg-[#06C755] text-white text-lg font-bold rounded-xl shadow active:scale-95 transition-transform">
+            📝 勤務記録を入力する
+          </button>
+          <p class="text-xs text-gray-500 text-center mt-3">
+            退室するまで、アプリを閉じずに
+          </p>
+        </div>
+
+        <!-- ⑤ 退室（鍵：勤務記録送信後に開く） -->
+        <div class="text-center text-gray-300 text-xl leading-none pt-1">↓</div>
+        <div class="bg-white rounded-2xl shadow-sm p-4 border-l-4 border-[#06C755] opacity-70">
+          <div class="flex items-center gap-2 mb-3">
+            <span class="bg-[#06C755] text-white text-xs font-bold rounded-full w-6 h-6 flex items-center justify-center flex-shrink-0">5</span>
+            <span class="text-sm font-bold text-gray-800">退室</span>
+            <span class="text-xs ml-auto">🔒</span>
+          </div>
+          <button class="w-full py-4 bg-gray-300 text-gray-400 text-lg font-bold rounded-xl shadow" disabled>
+            🔒 退室する
+          </button>
+          <p class="text-xs text-gray-500 text-center mt-2">勤務記録の送信後に退室できます</p>
+        </div>
+      </div>
+
+      <!-- 退室待ちモード（記録送信後・退室前） -->
+      <div id="home-mode-after-record" class="hidden space-y-3">
+        <!-- 完了サマリー（コンパクト） -->
+        <div class="bg-gray-100 rounded-2xl shadow-sm p-3 border-l-4 border-[#06C755]">
+          <p class="text-sm text-gray-700 font-semibold">✅ 入室・授業・報告・勤務記録 完了</p>
+          <p class="text-xs text-gray-500 mt-1">
+            <span id="summary-clock-in">--:--</span> 入室・<span id="summary-elapsed">--</span>経過
+          </p>
+        </div>
+
+        <!-- ⑤ 退室（メイン） -->
+        <div class="bg-green-50 rounded-2xl shadow-md p-5 border-2 border-[#06C755]">
+          <div class="flex items-center gap-2 mb-4">
+            <span class="bg-[#06C755] text-white text-sm font-bold rounded-full w-8 h-8 flex items-center justify-center flex-shrink-0">5</span>
+            <span class="text-base font-bold text-gray-800">退室</span>
+            <span class="text-xs font-bold text-[#06C755] ml-auto bg-green-100 px-2 py-0.5 rounded-full">いま</span>
+          </div>
+          <p id="home-min-exit-msg" class="text-sm font-semibold text-orange-500 text-center mb-3"></p>
+          <div id="home-exit-ok-banner" class="hidden mb-3 rounded-xl p-3 bg-green-50 border border-green-300 text-green-700 text-center font-bold text-sm">
+            ✅ 退室できます！
+          </div>
+          <div id="home-early-exit-err" class="hidden mb-3 rounded-xl p-3 text-sm bg-red-50 border border-red-300 text-red-700 text-center"></div>
+          <button id="btn-clock-out-home"
+            class="w-full py-5 bg-gray-300 text-gray-400 text-xl font-bold rounded-2xl shadow-md transition-all"
+            disabled>
+            🔒 退室する
+          </button>
         </div>
       </div>
     </div>
   </div>
+
+  <!-- お知らせ画面（お知らせ + タスク 一元化） -->
+  <div id="screen-notice" class="screen h-full overflow-hidden">
+    <div class="bg-[#06C755] text-white px-4 pt-10 pb-4 flex-shrink-0">
+      <div class="flex justify-between items-start">
+        <div>
+          <h2 class="text-lg font-bold">📋 お知らせ</h2>
+          <p class="text-xs opacity-75">確認したら左、完了したら右にチェック</p>
+        </div>
+        <button id="btn-refresh-items" onclick="loadItems()"
+          class="text-2xl active:opacity-50 leading-none mt-1 px-2"
+          title="最新に更新">🔄</button>
+      </div>
+    </div>
+    <div class="flex-1 overflow-y-auto px-4 py-4 space-y-3 pb-32">
+      <div class="bg-white rounded-2xl shadow-sm p-4">
+        <div class="flex justify-between items-center mb-2">
+          <div class="flex gap-3 text-[11px] text-gray-500">
+            <span class="flex items-center gap-1">
+              <span class="inline-block w-3 h-3 rounded border-2 border-blue-500 bg-blue-500"></span>
+              <span>確認</span>
+            </span>
+            <span class="flex items-center gap-1">
+              <span class="inline-block w-3 h-3 rounded border-2 border-[#06C755] bg-[#06C755]"></span>
+              <span>完了</span>
+            </span>
+          </div>
+          <span id="item-count" class="text-xs text-gray-400"></span>
+        </div>
+        <div id="item-list">
+          <p class="text-sm text-gray-400 text-center py-4">読み込み中...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- マニュアル画面（Google Drive リンク集） -->
+  <div id="screen-manual" class="screen h-full overflow-hidden">
+    <div class="bg-[#06C755] text-white px-4 pt-10 pb-4 flex-shrink-0">
+      <h2 class="text-lg font-bold">📖 マニュアル</h2>
+      <p class="text-xs opacity-75">タップで Google Drive を開きます</p>
+    </div>
+    <div class="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-32">
+      <!-- 業務フロー -->
+      <div>
+        <p class="text-xs font-bold text-gray-500 mb-2">📋 業務フロー</p>
+        <div class="bg-white rounded-2xl shadow-sm divide-y divide-gray-100">
+          <a href="https://drive.google.com/" target="_blank"
+            class="block p-4 active:bg-gray-50 flex justify-between items-center">
+            <span class="text-sm text-gray-800">業務フロー全体（入室→退室）</span>
+            <span class="text-gray-400">›</span>
+          </a>
+          <a href="https://drive.google.com/" target="_blank"
+            class="block p-4 active:bg-gray-50 flex justify-between items-center">
+            <span class="text-sm text-gray-800">打刻・勤務記録について</span>
+            <span class="text-gray-400">›</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- 給与・規則 -->
+      <div>
+        <p class="text-xs font-bold text-gray-500 mb-2">💰 給与・規則</p>
+        <div class="bg-white rounded-2xl shadow-sm divide-y divide-gray-100">
+          <a href="https://drive.google.com/" target="_blank"
+            class="block p-4 active:bg-gray-50 flex justify-between items-center">
+            <span class="text-sm text-gray-800">給与・締め日について</span>
+            <span class="text-gray-400">›</span>
+          </a>
+          <a href="https://drive.google.com/" target="_blank"
+            class="block p-4 active:bg-gray-50 flex justify-between items-center">
+            <span class="text-sm text-gray-800">通勤手当・申請方法</span>
+            <span class="text-gray-400">›</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- シフト -->
+      <div>
+        <p class="text-xs font-bold text-gray-500 mb-2">📅 シフト</p>
+        <div class="bg-white rounded-2xl shadow-sm divide-y divide-gray-100">
+          <a href="https://drive.google.com/" target="_blank"
+            class="block p-4 active:bg-gray-50 flex justify-between items-center">
+            <span class="text-sm text-gray-800">シフトのルール</span>
+            <span class="text-gray-400">›</span>
+          </a>
+          <a href="https://drive.google.com/" target="_blank"
+            class="block p-4 active:bg-gray-50 flex justify-between items-center">
+            <span class="text-sm text-gray-800">シフト希望の出し方</span>
+            <span class="text-gray-400">›</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- 困った時 -->
+      <div>
+        <p class="text-xs font-bold text-gray-500 mb-2">🚨 困った時</p>
+        <div class="bg-white rounded-2xl shadow-sm divide-y divide-gray-100">
+          <a href="https://drive.google.com/" target="_blank"
+            class="block p-4 active:bg-gray-50 flex justify-between items-center">
+            <span class="text-sm text-gray-800">体調不良・遅刻時の対応</span>
+            <span class="text-gray-400">›</span>
+          </a>
+          <a href="https://drive.google.com/" target="_blank"
+            class="block p-4 active:bg-gray-50 flex justify-between items-center">
+            <span class="text-sm text-gray-800">トラブル時の連絡先</span>
+            <span class="text-gray-400">›</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- 連絡先 -->
+      <div>
+        <p class="text-xs font-bold text-gray-500 mb-2">📞 連絡先</p>
+        <div class="bg-white rounded-2xl shadow-sm divide-y divide-gray-100">
+          <a href="https://drive.google.com/" target="_blank"
+            class="block p-4 active:bg-gray-50 flex justify-between items-center">
+            <span class="text-sm text-gray-800">スタッフ連絡先一覧</span>
+            <span class="text-gray-400">›</span>
+          </a>
+        </div>
+      </div>
+
+      <p class="text-[10px] text-gray-400 text-center mt-4">
+        ※ リンクは仮です。Google Driveの実URLに差し替えてください
+      </p>
+    </div>
+  </div>
+
+  <!-- 履歴画面 -->
+  <div id="screen-history" class="screen h-full overflow-hidden">
+    <div class="bg-[#06C755] text-white px-4 pt-10 pb-4 flex-shrink-0">
+      <h2 class="text-lg font-bold">📋 履歴</h2>
+      <p class="text-sm opacity-75" id="history-period"></p>
+    </div>
+    <!-- サブタブ -->
+    <div class="flex border-b border-gray-200 bg-white flex-shrink-0">
+      <button id="subtab-work" onclick="switchHistoryTab('work')"
+        class="flex-1 py-2 text-sm font-semibold text-[#06C755] border-b-2 border-[#06C755]">
+        勤務記録
+      </button>
+      <button id="subtab-pay" onclick="switchHistoryTab('pay')"
+        class="flex-1 py-2 text-sm font-semibold text-gray-400 border-b-2 border-transparent">
+        給与履歴
+      </button>
+    </div>
+    <div class="flex-1 overflow-y-auto pb-32" id="history-content">
+      <p class="text-gray-400 text-sm text-center p-8">読み込み中...</p>
+    </div>
+  </div>
+
+  <!-- シフト画面 -->
+  <div id="screen-shift" class="screen h-full overflow-hidden">
+    <div class="bg-[#06C755] text-white px-4 pt-10 pb-4 flex-shrink-0">
+      <h2 class="text-lg font-bold">📅 シフト</h2>
+    </div>
+    <div class="flex-1 flex items-center justify-center pb-32">
+      <div class="text-center p-6 space-y-4">
+        <p class="text-6xl">📅</p>
+        <p class="font-semibold text-gray-700">シフト管理表を開く</p>
+        <p class="text-sm text-gray-400">Googleスプレッドシートで確認できます</p>
+        <a href="https://docs.google.com/spreadsheets/d/1WSjKGSSgKAAUyPqUXzSirjILeHKed7aaolHVL2qutR4/edit"
+          target="_blank"
+          class="inline-block mt-2 px-8 py-4 bg-[#06C755] text-white font-bold rounded-2xl shadow-md active:scale-95 transition-transform">
+          📊 シフト表を開く
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ボトムナビゲーション（4タブ：お知らせはホーム上部のカードに集約） -->
+  <nav id="bottom-nav" class="hidden fixed bottom-0 left-0 right-0 max-w-sm mx-auto bg-white border-t border-gray-200 z-40">
+    <div class="flex">
+      <button onclick="showTab('home')" id="tab-home"
+        class="tab-btn flex-1 py-2 flex flex-col items-center gap-0.5 text-[#06C755]">
+        <span class="text-xl">🏠</span>
+        <span class="text-xs font-medium">ホーム</span>
+      </button>
+      <button onclick="showTab('shift')" id="tab-shift"
+        class="tab-btn flex-1 py-2 flex flex-col items-center gap-0.5 text-gray-400">
+        <span class="text-xl">📅</span>
+        <span class="text-xs font-medium">シフト</span>
+      </button>
+      <button onclick="showTab('history')" id="tab-history"
+        class="tab-btn flex-1 py-2 flex flex-col items-center gap-0.5 text-gray-400">
+        <span class="text-xl">📜</span>
+        <span class="text-xs font-medium">履歴</span>
+      </button>
+      <button onclick="showTab('manual')" id="tab-manual"
+        class="tab-btn flex-1 py-2 flex flex-col items-center gap-0.5 text-gray-400">
+        <span class="text-xl">📖</span>
+        <span class="text-xs font-medium">マニュアル</span>
+      </button>
+    </div>
+  </nav>
 
   <!-- 入室OK！オーバーレイ -->
   <div id="overlay-clockin" class="hidden fixed inset-0 bg-[#06C755] flex flex-col items-center justify-center gap-4 z-50">
@@ -92,7 +448,7 @@
       <p class="text-sm opacity-90" id="report-header-info"></p>
     </div>
 
-    <div class="flex-1 overflow-y-auto px-4 py-4 space-y-3" id="lessons-scroll">
+    <div class="flex-1 overflow-y-auto px-4 py-4 space-y-3 pb-32" id="lessons-scroll">
       <div id="lessons-container" class="space-y-3"></div>
 
       <button id="btn-add-lesson"
@@ -113,7 +469,7 @@
   <!-- 完了・退室画面 -->
   <!-- 理由選択画面（Z≥1h時に表示）-->
   <div id="screen-reason" class="screen h-full overflow-hidden">
-    <div class="flex flex-col h-full p-6 gap-4">
+    <div class="flex flex-col h-full p-6 pb-32 gap-4">
       <div class="text-center pt-4">
         <div class="text-5xl mb-3">⚠️</div>
         <h2 class="text-lg font-bold text-gray-800">滞在時間と勤務記録に差があります</h2>
@@ -150,32 +506,204 @@
     </div>
   </div>
 
-  <div id="screen-done" class="screen h-full items-center justify-center px-6">
+  <div id="screen-done" class="screen h-full items-center justify-center px-6 pb-32">
     <!-- 退室前 -->
     <div id="done-before-out" class="flex flex-col items-center gap-5 w-full">
       <div class="text-5xl">✅</div>
       <p class="text-xl font-bold text-gray-800">勤務記録を確認しました</p>
-      <p class="text-gray-500 text-sm text-center">授業お疲れ様でした！<br/>退室する前に下のボタンを押してください。</p>
-      <p id="min-exit-msg" class="text-sm font-semibold text-[#06C755]"></p>
+      <p class="text-gray-500 text-sm text-center">授業お疲れ様でした！<br/>退室できる時間になったら下のボタンが押せます。</p>
+      <p id="min-exit-msg" class="text-sm font-semibold text-orange-400"></p>
+      <!-- 退室OK バナー -->
+      <div id="exit-ok-banner" class="hidden w-full rounded-xl p-3 bg-green-50 border border-green-300 text-green-700 text-center font-bold text-sm">
+        ✅ 退室できます！
+      </div>
       <div id="early-exit-err" class="hidden w-full rounded-xl p-3 text-sm bg-red-50 border border-red-300 text-red-700 text-center"></div>
       <button id="btn-clock-out"
-        class="w-full py-5 bg-[#06C755] text-white text-xl font-bold rounded-2xl shadow-md active:scale-95 transition-transform">
-        🟢 退室する
+        class="w-full py-5 bg-gray-300 text-gray-400 text-xl font-bold rounded-2xl shadow-md transition-all"
+        disabled>
+        🔒 退室する
       </button>
     </div>
     <!-- 退室後 -->
     <div id="done-after-out" class="hidden flex flex-col items-center gap-5 w-full text-center">
       <div class="text-6xl">🎉</div>
       <p class="text-xl font-bold text-gray-800">退室しました</p>
-      <p class="text-gray-500 text-sm">お疲れ様でした！<br/>アプリを閉じてください。</p>
+      <p class="text-gray-500 text-sm">お疲れ様でした！</p>
+      <button id="btn-back-home"
+        class="px-8 py-3 bg-[#06C755] text-white text-lg font-bold rounded-2xl shadow-md active:scale-95 transition-transform">
+        🏠 ホームに戻る
+      </button>
+      <p class="text-xs text-gray-400">
+        または <span id="auto-back-countdown">15</span>秒後に自動でホームへ
+      </p>
+    </div>
+  </div>
+
+  <!-- 遠隔打刻 警告画面 -->
+  <div id="screen-far-warning" class="screen h-full overflow-hidden">
+    <div class="flex flex-col h-full p-6 pb-32 gap-4">
+      <div class="text-center pt-4">
+        <div class="text-5xl mb-3">📍</div>
+        <h2 class="text-lg font-bold text-gray-800" id="far-warn-title">塾から離れた場所での打刻</h2>
+        <p id="far-distance-text" class="text-orange-500 font-semibold mt-1"></p>
+        <p class="text-xs text-gray-500 mt-2">理由を選択してください</p>
+      </div>
+
+      <div class="space-y-2 flex-1 overflow-y-auto">
+        <button onclick="selectFarReason('退室押し忘れ・帰り道で打刻','far-reason-1')"
+          class="far-reason-btn w-full py-3 px-4 border-2 border-gray-300 rounded-xl text-sm text-gray-700 bg-white text-left">
+          🚶 退室押し忘れ・帰り道で打刻
+        </button>
+        <button onclick="selectFarReason('体調不良で早退・遅刻','far-reason-2')"
+          class="far-reason-btn w-full py-3 px-4 border-2 border-gray-300 rounded-xl text-sm text-gray-700 bg-white text-left">
+          🤒 体調不良で早退・遅刻
+        </button>
+        <button onclick="selectFarReason('教室外での業務（出張等）','far-reason-3')"
+          class="far-reason-btn w-full py-3 px-4 border-2 border-gray-300 rounded-xl text-sm text-gray-700 bg-white text-left">
+          🏫 教室外での業務（出張等）
+        </button>
+        <button onclick="selectFarReason('その他','far-reason-other')"
+          class="far-reason-btn w-full py-3 px-4 border-2 border-gray-300 rounded-xl text-sm text-gray-700 bg-white text-left">
+          📝 その他
+        </button>
+        <div id="far-other-input-area" class="hidden">
+          <input type="text" id="far-other-reason-text" placeholder="理由を入力"
+            class="w-full p-2 border border-gray-300 rounded-lg text-sm" />
+        </div>
+      </div>
+
+      <div class="flex gap-2 flex-shrink-0">
+        <button onclick="cancelFarWarning()" class="flex-1 py-3 bg-gray-200 text-gray-700 font-bold rounded-xl">
+          キャンセル
+        </button>
+        <button id="btn-confirm-far" onclick="confirmFarReason()"
+          class="flex-1 py-3 bg-[#06C755] text-white font-bold rounded-xl">
+          この理由で打刻
+        </button>
+      </div>
     </div>
   </div>
 
   <script>
     // ─── GAS 設定 ─────────────────────────────────────────────────────────────
-    const GAS_URL  = 'https://script.google.com/macros/s/AKfycbyeXCLgK6Xt1V3e1mXl28I_xg3AJRh2mJh6Wlp_sV_awHHmRutjIQB5LzAwxHJpLDtf/exec'
+    const GAS_URL  = 'https://script.google.com/macros/s/AKfycbwJW31-xZ3jYpatxSccFMiU8ZOhRVSMolXqa110REu9r8mzdVpWje-b5AHcTtPWV9md/exec'
     const LIFF_ID  = '2009964329-UsimhYJ2'
     const DEV_MODE = false  // true にするとモック動作（ブラウザ直接テスト用）
+
+    // ─── 塾の位置情報（中谷塾西明石）──────────────────────────────────────────
+    // ※ 実際の緯度経度に修正してください（Google Maps で塾を右クリック→ 座標表示）
+    const JUKU_LOCATION = { lat: 34.689, lng: 134.972 }
+    const JUKU_RADIUS_M = 200   // 許容半径（メートル）
+
+    // 2点間の距離（メートル）— Haversine formula
+    function distanceMeters(lat1, lng1, lat2, lng2) {
+      const R = 6371000
+      const toRad = d => d * Math.PI / 180
+      const dLat = toRad(lat2 - lat1)
+      const dLng = toRad(lng2 - lng1)
+      const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng/2)**2
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+    }
+
+    // 塾から離れているか判定（GPSなしなら null = チェック不可）
+    function isAwayFromJuku(location) {
+      if (!location || typeof location.lat !== 'number') return null
+      const d = distanceMeters(location.lat, location.lng, JUKU_LOCATION.lat, JUKU_LOCATION.lng)
+      return { distance: d, isAway: d > JUKU_RADIUS_M }
+    }
+    function fmtDistance(m) {
+      return m < 1000 ? `${Math.round(m)}m` : `${(m / 1000).toFixed(1)}km`
+    }
+
+    // GPS取得（共通ヘルパ）
+    async function getLocation() {
+      try {
+        return await new Promise(res => {
+          navigator.geolocation.getCurrentPosition(
+            p => res({ lat: p.coords.latitude, lng: p.coords.longitude }),
+            () => res(null), { timeout: 4000 }
+          )
+        })
+      } catch { return null }
+    }
+
+    // ─── 遠隔打刻 警告ダイアログの状態管理 ────────────────────────────────────
+    const farWarning = { type: null, location: null, distance: 0, callback: null, reason: null }
+
+    function showFarWarning(type, location, distance, callback) {
+      farWarning.type = type
+      farWarning.location = location
+      farWarning.distance = distance
+      farWarning.callback = callback
+      farWarning.reason = null
+
+      const titleEl = document.getElementById('far-warn-title')
+      if (titleEl) titleEl.textContent = type === 'in'
+        ? '塾から離れた場所での入室'
+        : '塾から離れた場所での退室'
+
+      document.getElementById('far-distance-text').textContent =
+        `現在地は塾から約 ${fmtDistance(distance)} 離れています`
+
+      // ボタンリセット
+      document.querySelectorAll('.far-reason-btn').forEach(b => {
+        b.classList.remove('bg-[#06C755]','text-white','border-[#06C755]')
+        b.classList.add('border-gray-300','text-gray-700','bg-white')
+      })
+      document.getElementById('far-other-input-area').classList.add('hidden')
+      document.getElementById('far-other-reason-text').value = ''
+
+      showScreen('far-warning')
+    }
+
+    function selectFarReason(reason, btnId) {
+      farWarning.reason = reason
+      document.querySelectorAll('.far-reason-btn').forEach(b => {
+        b.classList.remove('bg-[#06C755]','text-white','border-[#06C755]')
+        b.classList.add('border-gray-300','text-gray-700','bg-white')
+      })
+      const sel = document.getElementById(btnId)
+      if (sel) {
+        sel.classList.add('bg-[#06C755]','text-white','border-[#06C755]')
+        sel.classList.remove('border-gray-300','text-gray-700','bg-white')
+      }
+      document.getElementById('far-other-input-area').classList.toggle('hidden', reason !== 'その他')
+    }
+
+    async function confirmFarReason() {
+      let reason = farWarning.reason
+      if (!reason) { alert('理由を選択してください'); return }
+      if (reason === 'その他') {
+        const text = document.getElementById('far-other-reason-text').value.trim()
+        if (!text) { alert('理由を入力してください'); return }
+        reason = `その他: ${text}`
+      }
+      // 距離も付加
+      const fullReason = `📍遠隔(${fmtDistance(farWarning.distance)}) ${reason}`
+      const cb = farWarning.callback
+      farWarning.callback = null
+      if (cb) await cb(fullReason)
+    }
+
+    function cancelFarWarning() {
+      // 入室ボタンの状態を元に戻す（入室時のキャンセル）
+      if (farWarning.type === 'in') {
+        const btn = document.getElementById('btn-clock-in')
+        if (btn) { btn.textContent = '🟢 入室する'; btn.disabled = false }
+        renderHomeMode('before')
+      } else {
+        // 退室キャンセル：状態に応じて戻る（記録送信済 → ホーム後段、未送信 → 授業中）
+        if (state.pendingReport) {
+          renderHomeMode('after-record')
+        } else {
+          renderHomeMode('during')
+        }
+      }
+      farWarning.type = null
+      farWarning.callback = null
+      farWarning.reason = null
+      showScreen('home')
+    }
 
     async function gasGet(params) {
       const query = new URLSearchParams(params).toString()
@@ -203,6 +731,117 @@
       pendingReason  : null,  // 選択した理由
       commute        : null,  // 選択中の通勤手段 { label, allowance }
       staff          : { staffId: 'S001', name: '田中 花子', commutes: [] },
+    }
+
+    // ─── localStorage（途中で閉じても復帰できるセーフティネット）──────────────
+    const STORAGE = { SESSION: 'juku.session', DRAFT: 'juku.report.draft' }
+
+    function saveSession() {
+      try {
+        localStorage.setItem(STORAGE.SESSION, JSON.stringify({
+          staffId      : state.staff?.staffId || null,
+          clockInTime  : state.clockInTime,
+          clockInDate  : state.clockInDate ? state.clockInDate.toISOString() : null,
+          commute      : state.commute,
+          pendingReport: state.pendingReport,
+          minExitDate  : state.minExitDate ? state.minExitDate.toISOString() : null,
+        }))
+      } catch (e) {}
+    }
+    function loadSession() {
+      try { return JSON.parse(localStorage.getItem(STORAGE.SESSION) || 'null') } catch { return null }
+    }
+    function clearSession() {
+      try { localStorage.removeItem(STORAGE.SESSION) } catch {}
+    }
+    function saveDraftNow() {
+      try { localStorage.setItem(STORAGE.DRAFT, JSON.stringify(collectDraft())) } catch {}
+    }
+    function loadDraft() {
+      try { return JSON.parse(localStorage.getItem(STORAGE.DRAFT) || 'null') } catch { return null }
+    }
+    function clearDraft() {
+      try { localStorage.removeItem(STORAGE.DRAFT) } catch {}
+    }
+
+    // ─── ホーム画面のモード切替 ───────────────────────────────────────────────
+    let homeElapsedInterval = null
+    function renderHomeMode(mode) {
+      const before = document.getElementById('home-mode-before')
+      const during = document.getElementById('home-mode-during')
+      const after  = document.getElementById('home-mode-after-record')
+
+      // 全部隠す
+      before.classList.add('hidden')
+      during.classList.add('hidden')
+      after.classList.add('hidden')
+
+      if (mode === 'during') {
+        during.classList.remove('hidden')
+        updateHomeDuringInfo()
+        if (!homeElapsedInterval) homeElapsedInterval = setInterval(updateHomeDuringInfo, 60000)
+      } else if (mode === 'after-record') {
+        after.classList.remove('hidden')
+        updateHomeDuringInfo()  // サマリーの経過時間も更新
+        if (!homeElapsedInterval) homeElapsedInterval = setInterval(updateHomeDuringInfo, 60000)
+      } else {
+        // 'before'
+        before.classList.remove('hidden')
+        if (homeElapsedInterval) { clearInterval(homeElapsedInterval); homeElapsedInterval = null }
+      }
+    }
+    function updateHomeDuringInfo() {
+      if (!state.clockInDate) return
+      const inEl  = document.getElementById('home-clock-in-time')
+      const elEl  = document.getElementById('home-elapsed')
+      const sInEl = document.getElementById('summary-clock-in')
+      const sElEl = document.getElementById('summary-elapsed')
+      const diff = Math.floor((Date.now() - state.clockInDate.getTime()) / 60000)
+      const h = Math.floor(diff / 60)
+      const m = diff % 60
+      const elapsedStr = h > 0 ? `${h}時間${m}分` : `${m}分`
+      if (inEl)  inEl.textContent  = state.clockInTime || '--:--'
+      if (elEl)  elEl.textContent  = elapsedStr
+      if (sInEl) sInEl.textContent = state.clockInTime || '--:--'
+      if (sElEl) sElEl.textContent = elapsedStr
+    }
+
+    // ─── 勤務記録のドラフト保存・復元（途中で閉じても入力内容が残る）──────────
+    function collectDraft() {
+      const lessons = []
+      document.querySelectorAll('[id^="lesson-"]').forEach(card => {
+        if (!card.id.match(/^lesson-\d+$/)) return
+        const fields = { type: card.querySelector('.type-sel')?.value || '' }
+        ;['grade-sel', 'name-inp', 'class-inp', 'koma-sel', 'hour-sel'].forEach(cls => {
+          const els = card.querySelectorAll('.' + cls)
+          if (els.length === 1) fields[cls] = els[0].value || ''
+          else if (els.length > 1) fields[cls] = Array.from(els).map(e => e.value || '')
+        })
+        lessons.push(fields)
+      })
+      return { lessons }
+    }
+    function applyDraft(draft) {
+      if (!draft || !draft.lessons || draft.lessons.length === 0) return false
+      const container = document.getElementById('lessons-container')
+      container.innerHTML = ''
+      draft.lessons.forEach((l, i) => {
+        container.insertAdjacentHTML('beforeend', lessonCard(i))
+        const card = document.getElementById(`lesson-${i}`)
+        if (l.type) {
+          card.querySelector('.type-sel').value = l.type
+          onTypeChange(i, l.type)
+          ;['grade-sel', 'name-inp', 'class-inp', 'koma-sel', 'hour-sel'].forEach(cls => {
+            const val = l[cls]
+            if (val == null) return
+            const els = card.querySelectorAll('.' + cls)
+            if (Array.isArray(val)) val.forEach((v, idx) => { if (els[idx]) els[idx].value = v })
+            else if (els[0]) els[0].value = val
+          })
+        }
+      })
+      lessonCount = draft.lessons.length
+      return true
     }
 
     // ─── 通勤手段ボタン描画 ───────────────────────────────────────────────────
@@ -240,15 +879,353 @@
     function showScreen(id) {
       document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'))
       document.getElementById('screen-' + id).classList.add('active')
+
+      // メインタブ画面のみナビ表示。フロー中（report/reason/done/loading）は隠してフロー保護
+      const NAV_VISIBLE = ['home', 'notice', 'shift', 'history', 'manual']
+      const nav = document.getElementById('bottom-nav')
+      if (!NAV_VISIBLE.includes(id)) {
+        nav.classList.add('hidden')
+      } else {
+        nav.classList.remove('hidden')
+      }
+
+      // ホーム表示時に「処理中...」が残っていたら入室ボタンを初期状態に戻す
+      if (id === 'home') {
+        const btn = document.getElementById('btn-clock-in')
+        if (btn && btn.textContent === '処理中...') {
+          btn.textContent = '🟢 入室する'
+          btn.disabled = false
+        }
+      }
+
+      // アクティブタブをハイライト（タブ画面のみ色付け、それ以外はグレー）
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('text-[#06C755]')
+        btn.classList.add('text-gray-400')
+      })
+      const activeTab = document.getElementById('tab-' + id)
+      if (activeTab) {
+        activeTab.classList.add('text-[#06C755]')
+        activeTab.classList.remove('text-gray-400')
+      }
+    }
+
+    // ─── タブ切り替え ────────────────────────────────────────────────────────
+    function showTab(id) {
+      showScreen(id)
+      if (id === 'history') {
+        switchHistoryTab('work')
+      } else if (id === 'notice') {
+        loadItems()
+      }
+    }
+
+    // ─── 履歴サブタブ切り替え ─────────────────────────────────────────────────
+    function switchHistoryTab(tab) {
+      const workBtn = document.getElementById('subtab-work')
+      const payBtn  = document.getElementById('subtab-pay')
+      const active  = 'text-[#06C755] border-[#06C755] border-b-2'
+      const inactive= 'text-gray-400 border-transparent border-b-2'
+
+      if (tab === 'work') {
+        workBtn.className = `flex-1 py-2 text-sm font-semibold ${active}`
+        payBtn.className  = `flex-1 py-2 text-sm font-semibold ${inactive}`
+        loadHistory()
+      } else {
+        workBtn.className = `flex-1 py-2 text-sm font-semibold ${inactive}`
+        payBtn.className  = `flex-1 py-2 text-sm font-semibold ${active}`
+        loadPayrollHistory()
+      }
     }
 
     // ─── 時計 ────────────────────────────────────────────────────────────────
     function updateClock() {
       const now  = new Date()
-      const time = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-      const date = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`
-      document.getElementById('clock-display').textContent = time
-      document.getElementById('header-date').textContent  = date
+      const time = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+      const date = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日（${'日月火水木金土'[now.getDay()]}）`
+      const el = document.getElementById('clock-display')
+      if (el) el.textContent = time
+      const dateEl = document.getElementById('header-date')
+      if (dateEl) dateEl.textContent = date
+    }
+
+    // ─── お知らせ＋タスク 統合読み込み ────────────────────────────────────────
+    let cachedItems = []
+    async function loadItems() {
+      const el = document.getElementById('item-list')
+      el.innerHTML = '<p class="text-sm text-gray-400 text-center py-4">読み込み中...</p>'
+      try {
+        if (DEV_MODE) {
+          cachedItems = [
+            { itemId: 'N001', type: 'お知らせ', text: '5月の出勤日程を確認してください。', date: '5/1', dueDate: '', confirmed: false, completed: false },
+            { itemId: 'N002', type: 'お知らせ', text: 'GW期間の対応についてはグループLINEを確認してください。', date: '4/28', dueDate: '', confirmed: true, completed: false },
+            { itemId: 'T001', type: 'タスク', text: '5月のシフト希望を提出してください', date: '5/1', dueDate: '5/15', confirmed: false, completed: false },
+            { itemId: 'T002', type: 'タスク', text: '健康診断の予約をしてください', date: '4/25', dueDate: '5/31', confirmed: true, completed: false },
+            { itemId: 'T003', type: 'タスク', text: '安全研修動画の視聴', date: '5/1', dueDate: '5/10', confirmed: false, completed: false },
+            { itemId: 'T004', type: 'タスク', text: '4月分タイムシート確認', date: '4/25', dueDate: '4/30', confirmed: true, completed: true },
+          ]
+        } else {
+          const data = await gasGet({ action: 'getItems', staffId: state.staff.staffId })
+          cachedItems = data?.items || []
+        }
+        renderItems()
+      } catch (e) {
+        el.innerHTML = '<p class="text-sm text-red-400 text-center py-4">読み込み失敗</p>'
+      }
+    }
+
+    // 起動時にも一度呼ぶ（バーのテキスト準備のため）
+    async function loadNotices() {
+      // 互換性維持のラッパ。実態は loadItems に集約。
+      await loadItems()
+    }
+
+    // ホーム最上部の「お知らせ集約」カードを更新（常時表示・状態で見た目変化）
+    function renderHomeUrgent() {
+      const card     = document.getElementById('home-urgent')
+      const list     = document.getElementById('home-urgent-list')
+      const title    = document.getElementById('home-urgent-title')
+      const icon     = document.getElementById('home-urgent-title-icon')
+      if (!card || !list) return
+
+      // 未確認 OR 確認済み未完了タスク
+      const urgent = (cachedItems || []).filter(i => {
+        if (!i.confirmed) return true
+        if (i.type === 'タスク' && !i.completed) return true
+        return false
+      })
+
+      // ボタンは常に表示するため、card は隠さない
+      if (urgent.length === 0) {
+        // 全件対応済 → グリーン系
+        card.className = 'bg-green-50 border-2 border-green-200 rounded-2xl shadow-sm p-3'
+        if (icon)  icon.textContent  = '✅'
+        if (title) title.textContent = 'すべて確認済み 🎉'
+        list.innerHTML = '<p class="text-xs text-gray-600">お知らせ・タスクは全件対応済みです</p>'
+        // 「すべて見る」ボタンの border 色も合わせる
+        const btn = card.querySelector('button')
+        if (btn) btn.className = 'w-full text-xs text-[#06C755] font-semibold py-2 mt-2 border-t border-green-200 active:bg-green-100'
+        return
+      }
+
+      // 緊急あり → アンバー系
+      card.className = 'bg-amber-50 border-2 border-amber-300 rounded-2xl shadow-sm p-3'
+      if (icon)  icon.textContent  = '⚠️'
+      if (title) title.textContent = `確認が必要 (${urgent.length}件)`
+
+      list.innerHTML = urgent.slice(0, 5).map(i => {
+        const ic = !i.confirmed ? '❗' : '⏳'
+        const due = i.dueDate ? `<span class="text-[10px] text-amber-700 ml-1">〆${i.dueDate}</span>` : ''
+        return `<p class="text-xs text-gray-800 leading-relaxed">${ic} ${i.text}${due}</p>`
+      }).join('')
+
+      if (urgent.length > 5) {
+        list.innerHTML += `<p class="text-[11px] text-amber-600 text-right mt-1">他 ${urgent.length - 5} 件</p>`
+      }
+
+      const btn = card.querySelector('button')
+      if (btn) btn.className = 'w-full text-xs text-[#06C755] font-semibold py-2 mt-2 border-t border-amber-200 active:bg-amber-100'
+    }
+
+    function renderItems() {
+      const el      = document.getElementById('item-list')
+      const countEl = document.getElementById('item-count')
+      // ホーム上部の「確認が必要」も毎回更新
+      renderHomeUrgent()
+
+      if (!cachedItems || cachedItems.length === 0) {
+        el.innerHTML = '<p class="text-sm text-gray-400 text-center py-4">現在お知らせはありません</p>'
+        if (countEl) countEl.textContent = ''
+        return
+      }
+
+      // 残件: タスクで未完了 + お知らせで未確認
+      const remaining = cachedItems.filter(i =>
+        i.type === 'タスク' ? !i.completed : !i.confirmed
+      ).length
+      if (countEl) countEl.textContent = remaining > 0 ? `残り ${remaining} 件` : 'すべて完了 🎉'
+
+      el.innerHTML = cachedItems.map(i => {
+        const isTask    = i.type === 'タスク'
+        const isDone    = isTask ? i.completed : i.confirmed
+        const fadeCls   = isDone ? 'opacity-50' : ''
+        const txtCls    = isDone ? 'line-through text-gray-400' : 'text-gray-700'
+
+        // 確認チェックボックス（必ず表示）
+        const confirmBtn = `
+          <button onclick="toggleItem('${i.itemId}','confirmed')"
+            class="flex-shrink-0 mt-0.5 w-6 h-6 rounded border-2 ${i.confirmed ? 'bg-blue-500 border-blue-500 text-white' : 'border-gray-300 bg-white'} flex items-center justify-center text-xs font-bold">
+            ${i.confirmed ? '✓' : ''}
+          </button>`
+
+        // 完了チェックボックス（タスクのみ。お知らせは透明スペーサで揃える）
+        const completeBtn = isTask ? `
+          <button onclick="toggleItem('${i.itemId}','completed')"
+            class="flex-shrink-0 mt-0.5 w-6 h-6 rounded border-2 ${i.completed ? 'bg-[#06C755] border-[#06C755] text-white' : 'border-gray-300 bg-white'} flex items-center justify-center text-xs font-bold">
+            ${i.completed ? '✓' : ''}
+          </button>` : `
+          <div class="flex-shrink-0 mt-0.5 w-6 h-6"></div>`
+
+        return `
+          <div class="py-3 border-b border-gray-100 last:border-0 flex items-start gap-2 ${fadeCls}">
+            ${confirmBtn}
+            ${completeBtn}
+            <div class="flex-1 min-w-0">
+              <p class="text-sm ${txtCls}">
+                ${i.text}
+                ${i.date ? `<span class="text-xs text-gray-400 ml-1">${i.date}</span>` : ''}
+              </p>
+              ${i.dueDate ? `<p class="text-[11px] text-gray-400 mt-0.5">〆切: ${i.dueDate}</p>` : ''}
+            </div>
+          </div>`
+      }).join('')
+    }
+
+    async function toggleItem(itemId, field) {
+      const item = cachedItems.find(i => i.itemId === itemId)
+      if (!item) return
+      const newVal = !item[field]
+      item[field] = newVal
+      if (field === 'completed' && newVal) item.confirmed = true
+      renderItems()
+      if (DEV_MODE) {
+        console.log('[mock] item update:', itemId, field, newVal)
+      } else {
+        try {
+          await gasPost({
+            action : 'updateItemStatus',
+            staffId: state.staff.staffId,
+            itemId,
+            field,
+            value  : newVal,
+          })
+        } catch (e) {
+          item[field] = !newVal
+          renderItems()
+          alert('更新に失敗しました')
+        }
+      }
+    }
+
+    // ─── 勤務履歴読み込み ─────────────────────────────────────────────────────
+    async function loadHistory() {
+      const el = document.getElementById('history-content')
+      const periodEl = document.getElementById('history-period')
+      el.innerHTML = '<p class="text-gray-400 text-sm text-center p-8">読み込み中...</p>'
+      try {
+        let records = []
+        let period  = ''
+        if (DEV_MODE) {
+          const today = new Date()
+          const m = today.getMonth() + 1
+          period  = `${m}月の記録（21日〆）`
+          records = [
+            { date: `${m}/2`, clockIn: '15:00', clockOut: '19:30', lessons: 'MM 1:1 中学生×2コマ、自立×1h', total: '2.67h' },
+            { date: `${m}/5`, clockIn: '14:00', clockOut: '20:00', lessons: '一斉少人数 高校生×2h、補習×0.25h', total: '2.25h' },
+          ]
+        } else {
+          const data = await gasGet({ action: 'getHistory', staffId: state.staff.staffId })
+          records = data?.records || []
+          period  = data?.period  || ''
+        }
+        periodEl.textContent = period
+
+        if (records.length === 0) {
+          el.innerHTML = '<p class="text-gray-400 text-sm text-center p-8">勤務記録がありません</p>'
+          return
+        }
+        el.innerHTML = records.map(r => `
+          <div class="mx-4 my-3 bg-white rounded-2xl shadow-sm p-4">
+            <div class="flex justify-between items-center mb-2">
+              <span class="font-bold text-gray-800">${r.date}</span>
+              <span class="text-sm text-gray-500">${r.clockIn} 〜 ${r.clockOut}</span>
+            </div>
+            <p class="text-sm text-gray-600">${r.lessons}</p>
+            <p class="text-xs text-right text-[#06C755] font-semibold mt-1">勤務合計 ${r.total}</p>
+          </div>`).join('')
+      } catch (e) {
+        el.innerHTML = '<p class="text-red-400 text-sm text-center p-8">読み込みに失敗しました</p>'
+      }
+    }
+
+    // ─── 給与履歴読み込み ─────────────────────────────────────────────────────
+    async function loadPayrollHistory() {
+      const el = document.getElementById('history-content')
+      el.innerHTML = '<p class="text-gray-400 text-sm text-center p-8">読み込み中...</p>'
+      try {
+        let records = []
+        let current = null
+        if (DEV_MODE) {
+          const yesterday = new Date(Date.now() - 86400000)
+          current = {
+            period: { start: '4/21', end: '5/20' },
+            asOf  : `${yesterday.getMonth() + 1}/${yesterday.getDate()}`,
+            lesson: 8800, transport: 0, chief: 0, total: 8800, days: 4,
+          }
+          records = [
+            { start: '2026/1/21', end: '2026/2/20', lesson: 19800, transport: 0, chief: 0, total: 19800, days: 9 },
+            { start: '2025/12/21', end: '2026/1/20', lesson: 22000, transport: 0, chief: 0, total: 22000, days: 10 },
+            { start: '2025/11/21', end: '2025/12/20', lesson: 18500, transport: 0, chief: 0, total: 18500, days: 8 },
+          ]
+        } else {
+          const [histData, curData] = await Promise.all([
+            gasGet({ action: 'getPayrollHistory', staffId: state.staff.staffId }),
+            gasGet({ action: 'getCurrentPayroll', staffId: state.staff.staffId }),
+          ])
+          records = histData?.records || []
+          current = curData && !curData.error ? curData : null
+        }
+
+        const currentCard = current ? `
+          <div class="mx-4 my-3 bg-yellow-50 border-2 border-yellow-300 rounded-2xl shadow-sm p-4">
+            <div class="flex justify-between items-center mb-1">
+              <span class="font-bold text-gray-800">📊 今月のお給料（途中）</span>
+              <span class="text-[10px] font-bold text-yellow-700 bg-yellow-200 px-2 py-0.5 rounded-full">途中</span>
+            </div>
+            <div class="text-xs text-gray-500 mb-3">${current.asOf}までの集計</div>
+            <div class="space-y-1 text-sm text-gray-600">
+              ${current.lesson    ? `<div class="flex justify-between"><span>授業料</span><span>${current.lesson.toLocaleString()}円</span></div>` : ''}
+              ${current.transport ? `<div class="flex justify-between"><span>交通費</span><span>${current.transport.toLocaleString()}円</span></div>` : ''}
+              ${current.chief     ? `<div class="flex justify-between"><span>チーフ手当</span><span>${current.chief.toLocaleString()}円</span></div>` : ''}
+            </div>
+            <div class="flex justify-between items-center mt-3 pt-2 border-t border-yellow-200">
+              <span class="font-bold text-gray-700">ここまでの合計</span>
+              <span class="font-bold text-yellow-700 text-lg">${(current.total || 0).toLocaleString()}円</span>
+            </div>
+            <div class="flex justify-between items-center mt-1">
+              <span class="text-xs text-gray-500">出勤数</span>
+              <span class="text-xs text-gray-500">${current.days || 0}日</span>
+            </div>
+            <p class="text-[11px] text-gray-400 mt-2">〆日は${current.period.end}です。</p>
+          </div>` : ''
+
+        const historyCards = records.length === 0
+          ? '<p class="text-gray-400 text-sm text-center p-8">確定済みの給与履歴がありません</p>'
+          : records.map(r => `
+              <div class="mx-4 my-3 bg-white rounded-2xl shadow-sm p-4">
+                <div class="flex justify-between items-center mb-3">
+                  <span class="font-bold text-gray-800">${r.start} 〜 ${r.end}</span>
+                  <span class="text-xs text-gray-400">出勤 ${r.days}日</span>
+                </div>
+                <div class="space-y-1 text-sm text-gray-600">
+                  ${r.lesson    ? `<div class="flex justify-between"><span>授業料</span><span>${r.lesson.toLocaleString()}円</span></div>` : ''}
+                  ${r.transport ? `<div class="flex justify-between"><span>交通費</span><span>${r.transport.toLocaleString()}円</span></div>` : ''}
+                  ${r.chief     ? `<div class="flex justify-between"><span>チーフ手当</span><span>${r.chief.toLocaleString()}円</span></div>` : ''}
+                </div>
+                <div class="flex justify-between items-center mt-3 pt-2 border-t border-gray-100">
+                  <span class="font-bold text-gray-700">合計支給額</span>
+                  <span class="font-bold text-[#06C755] text-lg">${r.total.toLocaleString()}円</span>
+                </div>
+              </div>`).join('')
+
+        if (!current && records.length === 0) {
+          el.innerHTML = '<p class="text-gray-400 text-sm text-center p-8">給与履歴がありません</p>'
+          return
+        }
+        el.innerHTML = currentCard + historyCards
+      } catch (e) {
+        el.innerHTML = '<p class="text-red-400 text-sm text-center p-8">読み込みに失敗しました</p>'
+      }
     }
 
     // ─── 入室 ────────────────────────────────────────────────────────────────
@@ -268,12 +1245,27 @@
         })
       } catch {}
 
+      // 塾から離れている場合は警告画面で理由選択
+      const dCheck = isAwayFromJuku(location)
+      if (dCheck && dCheck.isAway) {
+        btn.textContent = '🟢 入室する'
+        btn.disabled = false
+        showFarWarning('in', location, dCheck.distance, async (reason) => {
+          await processClockIn(location, reason)
+        })
+        return
+      }
+
+      await processClockIn(location, '')
+    }
+
+    async function processClockIn(location, reason) {
       const now     = new Date()
       const timeStr = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
 
       if (DEV_MODE) {
         await mockDelay(500)
-        console.log('[mock] 入室:', { time: now.toISOString(), location })
+        console.log('[mock] 入室:', { time: now.toISOString(), location, reason })
       } else {
         await gasPost({
           action          : 'attendance',
@@ -284,40 +1276,78 @@
           location,
           commuteLabel    : state.commute?.label    || '',
           commuteAllowance: state.commute?.allowance || 0,
+          reason          : reason || '',
         })
       }
 
       state.clockInTime = timeStr
       state.clockInDate = now
 
-      // 入室OKオーバーレイを表示 → 1.5秒後に勤務記録画面へ
+      // セッションを localStorage に保存（途中で閉じても復帰できるように）
+      saveSession()
+
+      // 入室OKオーバーレイ → ホーム（授業中モード）へ
       const overlay = document.getElementById('overlay-clockin')
       document.getElementById('overlay-time').textContent = timeStr + ' 入室'
       overlay.classList.remove('hidden')
       setTimeout(() => {
         overlay.classList.add('hidden')
-        showReportScreen()
+        renderHomeMode('during')
+        showScreen('home')
       }, 1500)
     }
 
     document.getElementById('btn-clock-in').onclick = clockIn
 
+    // 「📝 勤務記録を入力する」ボタン
+    document.getElementById('btn-go-report').onclick = function () {
+      showReportScreen()
+    }
+
+    // 「📲 最小化（LINEを閉じる）」ボタン
+    document.getElementById('btn-minimize').onclick = function () {
+      if (typeof liff !== 'undefined' && liff.closeWindow) {
+        try { liff.closeWindow() } catch (e) { console.warn(e) }
+      } else {
+        alert('（テストモード）本番ではここでLINEが閉じます')
+      }
+    }
+
     // ─── 退室 ────────────────────────────────────────────────────────────────
     const fmtTime = d => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
 
     async function clockOut() {
-      const now   = new Date()
-      const errEl = document.getElementById('early-exit-err')
+      const now      = new Date()
+      const errEl    = document.getElementById('early-exit-err')
+      const homeErr  = document.getElementById('home-early-exit-err')
 
       // ── 最低退室時刻チェック ──
       if (state.minExitDate && now < state.minExitDate) {
         const minStr = state.minExitDate.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
-        errEl.textContent = `⚠️ ${minStr} 以降に退室してください`
-        errEl.classList.remove('hidden')
+        const txt    = `⚠️ ${minStr} 以降に退室してください`
+        if (errEl)   { errEl.textContent = txt;   errEl.classList.remove('hidden') }
+        if (homeErr) { homeErr.textContent = txt; homeErr.classList.remove('hidden') }
         return
       }
-      errEl.classList.add('hidden')
+      if (errEl)   errEl.classList.add('hidden')
+      if (homeErr) homeErr.classList.add('hidden')
 
+      // ── 位置情報取得＋塾から離れているかチェック ──
+      const location = await getLocation()
+      state.exitLocation = location
+      const dCheck = isAwayFromJuku(location)
+      if (dCheck && dCheck.isAway) {
+        showFarWarning('out', location, dCheck.distance, async (farReason) => {
+          state.farReasonOut = farReason
+          await proceedClockOutZCheck(now)
+        })
+        return
+      }
+      state.farReasonOut = ''
+      await proceedClockOutZCheck(now)
+    }
+
+    async function proceedClockOutZCheck(now) {
       // ── Z（時間差）を計算：1h以上なら理由選択へ ──
       if (state.clockInTime && state.pendingReport) {
         const [ih, im] = state.clockInTime.split(':').map(Number)
@@ -327,14 +1357,13 @@
         const V = state.pendingReport.V || 0
         const Z = Y - V
 
-        if (DEV_MODE ? Z >= 0 : Z >= 1) {  // DEV_MODE時は必ず理由選択画面を表示
+        if (DEV_MODE ? Z >= 0 : Z >= 1) {
           state.pendingClockOut = now
           state.pendingReason   = null
           const zh = Math.floor(Z)
           const zm = Math.round((Z - zh) * 60)
           document.getElementById('z-diff-text').textContent =
             `時間差 ${zh}時間${zm > 0 ? zm + '分' : ''}（通常は15分以内が目安）`
-          // ボタンをリセット
           document.querySelectorAll('.reason-btn').forEach(b => {
             b.classList.remove('bg-[#06C755]','text-white','border-[#06C755]')
             b.classList.add('border-gray-300','text-gray-700','bg-white')
@@ -346,7 +1375,8 @@
         }
       }
 
-      await submitClockOut(now, '')
+      // 遠隔の理由のみ（Z異常なし）でそのまま送信
+      await submitClockOut(now, state.farReasonOut || '')
     }
 
     // ── 理由ボタン選択 ──
@@ -371,10 +1401,14 @@
         if (!text) { alert('理由を入力してください'); return }
         reason = `その他: ${text}`
       }
+      // 遠隔退室の理由があれば組み合わせる
+      const combined = state.farReasonOut
+        ? `${state.farReasonOut} / ${reason}`
+        : reason
       const btn = document.getElementById('btn-confirm-reason')
       btn.textContent = '処理中...'
       btn.disabled = true
-      await submitClockOut(state.pendingClockOut, reason)
+      await submitClockOut(state.pendingClockOut, combined)
       btn.textContent = '🟢 退室する'
       btn.disabled = false
     }
@@ -396,7 +1430,7 @@
             name             : state.staff.name,
             type             : 'out',
             timestamp        : now.toISOString(),
-            location         : null,
+            location         : state.exitLocation || null,
             commuteLabel     : state.commute?.label     || '',
             commuteAllowance : state.commute?.allowance || 0,
             reason,
@@ -409,13 +1443,101 @@
         ])
       }
 
+      // 全 localStorage をクリア（退室完了で1サイクル終了）
+      clearSession()
+      clearDraft()
+
       // 退室後の表示へ
       document.getElementById('done-before-out').classList.add('hidden')
       document.getElementById('done-after-out').classList.remove('hidden')
       showScreen('done')
+
+      // 15秒カウントダウン → 自動でホーム（お知らせ確認等のため）
+      startBackToHomeCountdown(15)
     }
 
-    document.getElementById('btn-clock-out').onclick = clockOut
+    // 退室後の「ホームに戻る」ハンドリング（手動 or 自動）
+    let backToHomeTimer = null
+    function backToHome() {
+      if (backToHomeTimer) { clearInterval(backToHomeTimer); backToHomeTimer = null }
+      // 退室後はお知らせ最新化のために再読込
+      if (typeof loadItems === 'function') loadItems()
+      renderHomeMode('before')
+      showScreen('home')
+    }
+    function startBackToHomeCountdown(seconds) {
+      const el = document.getElementById('auto-back-countdown')
+      let remaining = seconds
+      if (el) el.textContent = remaining
+      if (backToHomeTimer) clearInterval(backToHomeTimer)
+      backToHomeTimer = setInterval(() => {
+        remaining--
+        if (el) el.textContent = remaining
+        if (remaining <= 0) {
+          clearInterval(backToHomeTimer); backToHomeTimer = null
+          backToHome()
+        }
+      }, 1000)
+    }
+    document.getElementById('btn-back-home').onclick = backToHome
+
+    document.getElementById('btn-clock-out').onclick      = clockOut
+    document.getElementById('btn-clock-out-home').onclick = clockOut
+
+    // ─── 退室可能時刻チェック（30秒ごとに監視）────────────────────────────────
+    let exitCheckInterval = null
+
+    function startExitTimeCheck() {
+      if (exitCheckInterval) clearInterval(exitCheckInterval)
+
+      function check() {
+        const now = new Date()
+        const ready = !state.minExitDate || now >= state.minExitDate
+
+        // ホーム画面側の要素
+        const homeBtn    = document.getElementById('btn-clock-out-home')
+        const homeBanner = document.getElementById('home-exit-ok-banner')
+        const homeMsg    = document.getElementById('home-min-exit-msg')
+        // screen-done 側（互換性維持）
+        const btn        = document.getElementById('btn-clock-out')
+        const banner     = document.getElementById('exit-ok-banner')
+        const msg        = document.getElementById('min-exit-msg')
+
+        if (ready) {
+          // 退室OK！
+          clearInterval(exitCheckInterval)
+          exitCheckInterval = null
+          if (homeBtn) {
+            homeBtn.disabled    = false
+            homeBtn.className   = 'w-full py-5 bg-[#06C755] text-white text-xl font-bold rounded-2xl shadow-md active:scale-95 transition-all'
+            homeBtn.textContent = '🟢 退室する'
+          }
+          if (homeBanner) homeBanner.classList.remove('hidden')
+          if (homeMsg)    homeMsg.classList.add('hidden')
+          if (btn) {
+            btn.disabled    = false
+            btn.className   = 'w-full py-5 bg-[#06C755] text-white text-xl font-bold rounded-2xl shadow-md active:scale-95 transition-all'
+            btn.textContent = '🟢 退室する'
+          }
+          if (banner) banner.classList.remove('hidden')
+          if (msg)    msg.classList.add('hidden')
+        } else {
+          // まだ退室不可
+          const minStr = state.minExitDate.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+          if (homeMsg) {
+            homeMsg.textContent = `🕐 ${minStr} 以降に退室できます`
+            homeMsg.classList.remove('hidden')
+          }
+          if (msg) {
+            msg.textContent = `🕐 ${minStr} 以降に退室できます`
+            msg.classList.remove('hidden')
+          }
+        }
+      }
+
+      check()  // 即時チェック
+      exitCheckInterval = setInterval(check, DEV_MODE ? 3000 : 30000)  // DEV_MODE時は3秒ごと
+    }
 
     // ─── 勤務記録フォーム ─────────────────────────────────────────────────────
     const GRADES    = ['小学生', '中学生', '高校生']
@@ -525,8 +1647,14 @@
       const now     = new Date()
       const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
       document.getElementById('report-header-info').textContent = `${dateStr}　${state.staff.name}　${state.clockInTime} 入室`
-      lessonCount = 1
-      document.getElementById('lessons-container').innerHTML = lessonCard(0)
+
+      // ドラフトがあれば復元、なければ空のカード1枚
+      const draft = loadDraft()
+      if (!applyDraft(draft)) {
+        lessonCount = 1
+        document.getElementById('lessons-container').innerHTML = lessonCard(0)
+      }
+
       document.getElementById('z-check-msg').classList.add('hidden')
       const btn = document.getElementById('btn-submit-report')
       btn.textContent = '勤務記録を送信する'
@@ -537,7 +1665,12 @@
     document.getElementById('btn-add-lesson').onclick = function () {
       const idx = lessonCount++
       document.getElementById('lessons-container').insertAdjacentHTML('beforeend', lessonCard(idx))
+      saveDraftNow()
     }
+
+    // 入力変更を検知してドラフトを自動保存（report画面のフォーム全体に委譲）
+    document.getElementById('lessons-container').addEventListener('change', saveDraftNow)
+    document.getElementById('lessons-container').addEventListener('input', saveDraftNow)
 
     // ─── 授業データを収集 ─────────────────────────────────────────────────────
     function collectLessons() {
@@ -639,21 +1772,64 @@
         V           : V,
       }
 
-      // 最低退室時刻を state に保存・退室画面に表示
-      state.minExitDate = new Date(clockIn.getTime() + V * 3600000)
+      // 最低退室時刻を state に保存（DEV_MODE時は10秒後）
+      state.minExitDate = DEV_MODE
+        ? new Date(Date.now() + 10000)
+        : new Date(clockIn.getTime() + V * 3600000)
       const minStr = state.minExitDate.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
       document.getElementById('min-exit-msg').textContent = `🕐 ${minStr} 以降に退室できます`
 
-      // 退室画面へ
-      document.getElementById('done-before-out').classList.remove('hidden')
-      document.getElementById('done-after-out').classList.add('hidden')
-      document.getElementById('early-exit-err').classList.add('hidden')
-      showScreen('done')
+      // ドラフトクリア & セッション更新（pendingReport, minExitDate を保存）
+      clearDraft()
+      saveSession()
+
+      // ホームの「退室待ちモード」へ遷移（退室タイマー＋退室ボタンが表示される）
+      document.getElementById('home-early-exit-err').classList.add('hidden')
+      document.getElementById('home-exit-ok-banner').classList.add('hidden')
+      renderHomeMode('after-record')
+      showScreen('home')
+      startExitTimeCheck()
     }
 
     // ─── Utils ───────────────────────────────────────────────────────────────
     function mockDelay(ms) {
       return new Promise(r => setTimeout(r, ms))
+    }
+
+    // ─── localStorage からの復帰（途中で閉じた人を正しい画面に戻す）───────────
+    function restoreFromSession() {
+      const session = loadSession()
+      if (!session || !session.clockInTime || !session.clockInDate) {
+        renderHomeMode('before')
+        showScreen('home')
+        return
+      }
+      // 別講師（複数LINEアカウント切替時）のセッションは捨てる
+      if (session.staffId && state.staff?.staffId && session.staffId !== state.staff.staffId) {
+        clearSession(); clearDraft()
+        renderHomeMode('before')
+        showScreen('home')
+        return
+      }
+      // state を復元
+      state.clockInTime   = session.clockInTime
+      state.clockInDate   = new Date(session.clockInDate)
+      state.commute       = session.commute || state.commute
+      state.pendingReport = session.pendingReport || null
+      state.minExitDate   = session.minExitDate ? new Date(session.minExitDate) : null
+
+      if (state.pendingReport && state.minExitDate) {
+        // 勤務記録送信済み → ホームの退室待ちモードへ
+        document.getElementById('home-early-exit-err').classList.add('hidden')
+        document.getElementById('home-exit-ok-banner').classList.add('hidden')
+        renderHomeMode('after-record')
+        showScreen('home')
+        startExitTimeCheck()
+      } else {
+        // 入室中・記録未送信 → ホーム（授業中モード）へ
+        renderHomeMode('during')
+        showScreen('home')
+      }
     }
 
     // ─── Init ────────────────────────────────────────────────────────────────
@@ -662,15 +1838,17 @@
       updateClock()
 
       if (DEV_MODE) {
-        // モック：そのまま打刻画面へ
-        await mockDelay(1000)
+        // モック：ホーム画面へ
+        await mockDelay(800)
         state.staff.commutes = [
           { label: '自転車', allowance: 0 },
           { label: '電車', allowance: 360 },
         ]
         document.getElementById('staff-name').textContent = state.staff.name + ' 先生'
+        document.getElementById('avatar').textContent = state.staff.name.charAt(0)
         renderCommuteOptions(state.staff.commutes)
-        showScreen('clock')
+        loadNotices()
+        restoreFromSession()  // localStorage に入室中セッションがあれば復帰
         return
       }
 
@@ -713,7 +1891,8 @@
         document.getElementById('staff-name').textContent = staff.name + ' 先生'
         document.getElementById('avatar').textContent = staff.name.charAt(0)
         renderCommuteOptions(staff.commutes || [])
-        showScreen('clock')
+        loadNotices()
+        restoreFromSession()  // localStorage に入室中セッションがあれば復帰
 
       } catch (err) {
         document.getElementById('screen-loading').innerHTML = `
