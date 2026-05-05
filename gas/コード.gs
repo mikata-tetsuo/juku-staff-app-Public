@@ -707,48 +707,129 @@ function approveRegistrations() {
     return
   }
 
-  const rows = reqSheet.getDataRange().getValues().slice(1)
-  const pending = rows
-    .map((r, i) => ({ row: i + 2, time: r[0], lineUserId: r[1], name: r[2], status: r[3] }))
-    .filter(r => r.lineUserId && r.name && r.status !== '承認済')
+  const reqRows = reqSheet.getDataRange().getValues().slice(1)
+  const pending = reqRows
+    .map((r, i) => ({ reqRow: i + 2, time: r[0], lineUserId: r[1], name: r[2], status: r[3] }))
+    .filter(r => r.lineUserId && r.name && r.status !== '承認済' && r.status !== '既登録' && r.status !== 'スキップ')
 
   if (pending.length === 0) {
     ui.alert('未対応の登録申請はありません 🎉')
     return
   }
 
-  const list = pending.map((p, i) => `${i + 1}. ${p.name}`).join('\n')
+  // 講師マスタを読み込んで判定
+  const masterRows = masterSheet.getDataRange().getValues().slice(1)
+  const normalize = name => String(name || '').replace(/[\s　]+/g, '').trim()
+
+  // 申請ごとに処理アクションを判定
+  const decisions = pending.map(p => {
+    // ① LINE_ID が既に講師マスタにある？
+    const existingByLineId = masterRows.findIndex(mr =>
+      mr[0] && String(mr[0]) === String(p.lineUserId)
+    )
+    if (existingByLineId >= 0) {
+      return {
+        ...p,
+        action: 'already-registered',
+        masterRowIdx: existingByLineId + 2,
+        staffId: String(masterRows[existingByLineId][1] || ''),
+      }
+    }
+
+    // ② 講師マスタに同氏名 + LINE_ID 空の行がある？
+    const targetName = normalize(p.name)
+    const candidates = masterRows
+      .map((mr, i) => ({ mr, i }))
+      .filter(({ mr }) => normalize(mr[2]) === targetName)
+
+    const emptyIdMatch = candidates.find(c => !c.mr[0])
+    if (emptyIdMatch) {
+      return {
+        ...p,
+        action: 'update',
+        masterRowIdx: emptyIdMatch.i + 2,
+        staffId: String(emptyIdMatch.mr[1] || ''),
+      }
+    }
+
+    // ③ 同氏名で別の LINE_ID が既登録 → 同姓同名コンフリクト
+    if (candidates.length > 0) {
+      return {
+        ...p,
+        action: 'name-conflict',
+        existingId: String(candidates[0].mr[1] || ''),
+      }
+    }
+
+    // ④ マッチなし → 新規作成
+    return { ...p, action: 'create' }
+  })
+
+  // ダイアログメッセージ構築
+  const lines = decisions.map((d, i) => {
+    const num = `${i + 1}. ${d.name}`
+    if (d.action === 'update')             return `${num} → ✅ 既存行 ${d.staffId} に LINE_ID を追加`
+    if (d.action === 'create')             return `${num} → 🆕 新規行として作成`
+    if (d.action === 'already-registered') return `${num} → ⏭ 既登録 (${d.staffId})、スキップ`
+    if (d.action === 'name-conflict')      return `${num} → ⚠️ 同姓同名 ${d.existingId} あり、要確認・スキップ`
+    return num
+  }).join('\n')
+
+  const counts = decisions.reduce((acc, d) => {
+    acc[d.action] = (acc[d.action] || 0) + 1
+    return acc
+  }, {})
+
+  const summary = [
+    `更新: ${counts.update || 0}名`,
+    `新規: ${counts.create || 0}名`,
+    `スキップ: ${(counts['already-registered'] || 0) + (counts['name-conflict'] || 0)}名`,
+  ].join(' / ')
+
   const res = ui.alert(
-    '🆔 未対応の登録申請',
-    `以下を講師マスタに追加します:\n\n${list}\n\n` +
-    `※ スタッフIDは自動採番（既存の最大番号+1）\n` +
-    `※ グレード・通勤手段などは追加後に手動入力してください`,
+    '🆔 登録申請の承認',
+    `${lines}\n\n[${summary}]\n\n実行しますか？`,
     ui.ButtonSet.OK_CANCEL
   )
   if (res !== ui.Button.OK) return
 
-  // 既存スタッフIDの最大値を取得（"S001" 形式想定）
-  const masterRows = masterSheet.getDataRange().getValues().slice(1)
+  // 既存スタッフIDの最大値（新規作成用）
   const maxNum = masterRows
     .map(r => String(r[1] || ''))
     .filter(s => /^S\d+$/.test(s))
     .reduce((max, s) => Math.max(max, parseInt(s.slice(1), 10) || 0), 0)
 
-  pending.forEach((p, i) => {
-    const newId = `S${String(maxNum + i + 1).padStart(3, '0')}`
-    // [LINE_ID, スタッフID, 氏名, グレード, メール, チーフ, 通勤1, 手当1, 通勤2, 手当2]
-    masterSheet.appendRow([p.lineUserId, newId, p.name, '', '', '', '', '', '', ''])
-    reqSheet.getRange(p.row, 4).setValue('承認済')
-    reqSheet.getRange(p.row, 5).setValue(`講師マスタ追加: ${newId} (${Utilities.formatDate(new Date(), 'Asia/Tokyo', 'M/d')})`)
+  const today = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'M/d')
+  let newCounter = 0
+
+  decisions.forEach(d => {
+    if (d.action === 'update') {
+      // 既存行の A列（LINE_ID）に追加
+      masterSheet.getRange(d.masterRowIdx, 1).setValue(d.lineUserId)
+      reqSheet.getRange(d.reqRow, 4).setValue('承認済')
+      reqSheet.getRange(d.reqRow, 5).setValue(`既存行 ${d.staffId} に登録 (${today})`)
+    } else if (d.action === 'create') {
+      const newId = `S${String(maxNum + (++newCounter)).padStart(3, '0')}`
+      masterSheet.appendRow([d.lineUserId, newId, d.name, '', '', '', '', '', '', ''])
+      reqSheet.getRange(d.reqRow, 4).setValue('承認済')
+      reqSheet.getRange(d.reqRow, 5).setValue(`講師マスタ新規追加: ${newId} (${today})`)
+    } else if (d.action === 'already-registered') {
+      reqSheet.getRange(d.reqRow, 4).setValue('既登録')
+      reqSheet.getRange(d.reqRow, 5).setValue(`既に登録済み: ${d.staffId} (${today})`)
+    } else if (d.action === 'name-conflict') {
+      reqSheet.getRange(d.reqRow, 4).setValue('スキップ')
+      reqSheet.getRange(d.reqRow, 5).setValue(`同姓同名 ${d.existingId} あり、要確認 (${today})`)
+    }
   })
 
   ui.alert(
     '✅ 完了',
-    `${pending.length}名を講師マスタに追加しました。\n\n` +
+    `${summary}\n\n` +
     `次の手順:\n` +
-    `1. 講師マスタを開いてグレード・通勤手段等を入力\n` +
-    `2. 講師にLINEで「登録完了しました」と連絡\n` +
-    `3. 講師がアプリを再起動 → 利用可能に`,
+    `1. 「更新」した行: もう設定済みなのでそのまま運用可\n` +
+    `2. 「新規」した行: グレード・通勤手段等を講師マスタで入力\n` +
+    `3. 「⚠️ 要確認」: 同姓同名の可能性、登録申請シートで内容確認\n` +
+    `4. 各講師にLINEで「登録完了」と連絡 → アプリ再起動で利用可能`,
     ui.ButtonSet.OK
   )
 }
