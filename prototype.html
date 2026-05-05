@@ -41,9 +41,10 @@
       <div class="bg-white rounded-2xl shadow-sm p-5">
         <p class="text-sm text-gray-700 mb-4 leading-relaxed">
           このアプリを使うには事前登録が必要です。<br/>
-          氏名（フルネーム）を入力して登録申請してください。
+          氏名（フルネーム）を入力して登録申請してください。<br/>
+          <span class="text-xs text-amber-700">※ 姓名の間にスペースは入れないでください</span>
         </p>
-        <input id="register-name" type="text" placeholder="例: 田中 花子"
+        <input id="register-name" type="text" placeholder="例: 田中花子"
           class="w-full p-3 border-2 border-gray-200 rounded-xl mb-4 text-sm focus:outline-none focus:border-[#06C755]" />
         <button id="btn-register"
           class="w-full py-4 bg-[#06C755] text-white font-bold rounded-2xl shadow-md active:scale-95 transition-transform">
@@ -1354,7 +1355,9 @@
 
     // 「📝 登録申請する」ボタン
     document.getElementById('btn-register').onclick = async function () {
-      const name = document.getElementById('register-name').value.trim()
+      // 半角・全角スペースを全削除（姓名の間にスペースなしルール）
+      const raw = document.getElementById('register-name').value
+      const name = raw.replace(/[\s　]+/g, '')
       if (!name) { alert('氏名を入力してください'); return }
       if (name.length < 2) { alert('氏名はフルネームで入力してください'); return }
       const btn = this
