@@ -412,6 +412,16 @@ function updateTaskDashboard() {
   if (dashboard) ss.deleteSheet(dashboard)
   dashboard = ss.insertSheet('タスク確認状況')
 
+  // タブ色を緑に固定
+  dashboard.setTabColor('#4CAF50')
+
+  // 「お知らせ」シートの直後に移動
+  const noticeSheet = ss.getSheetByName('お知らせ')
+  if (noticeSheet) {
+    ss.setActiveSheet(dashboard)
+    ss.moveActiveSheet(noticeSheet.getIndex() + 1)
+  }
+
   // ヘッダー: 種別 | 項目 | 講師1 | 講師2 | ...
   const header = ['種別', '項目', ...teachers.map(t => t.name)]
   dashboard.getRange(1, 1, 1, header.length).setValues([header])
