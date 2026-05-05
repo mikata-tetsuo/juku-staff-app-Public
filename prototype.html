@@ -85,7 +85,10 @@
       <div class="flex items-center gap-3">
         <div id="avatar" class="w-11 h-11 rounded-full bg-white/30 flex items-center justify-center text-xl font-bold flex-shrink-0">田</div>
         <div class="flex-1 min-w-0">
-          <p class="font-bold text-lg leading-tight" id="staff-name">田中 花子 先生</p>
+          <p class="font-bold text-lg leading-tight">
+            <span id="staff-name">田中 花子 先生</span>
+            <span id="staff-grade-badge" class="hidden ml-1 text-xs bg-white/30 px-2 py-0.5 rounded font-medium align-middle"></span>
+          </p>
           <p class="text-sm opacity-80">こんにちは！お疲れ様です 🌟</p>
         </div>
         <p class="text-lg font-mono font-semibold opacity-90 flex-shrink-0" id="clock-display"></p>
@@ -319,6 +322,20 @@
           <p class="text-sm text-gray-400 text-center py-4">読み込み中...</p>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- グレード時給表（マニュアル内部画面） -->
+  <div id="screen-rate-table" class="screen h-full overflow-hidden">
+    <div class="bg-[#06C755] text-white px-4 pt-10 pb-4 flex-shrink-0 flex items-center gap-3">
+      <button onclick="showTab('manual')" class="text-2xl active:opacity-50 leading-none px-1">←</button>
+      <div>
+        <h2 class="text-lg font-bold">💰 グレード時給表</h2>
+        <p class="text-xs opacity-75">あなたのグレード列は緑でハイライト</p>
+      </div>
+    </div>
+    <div id="rate-table-content" class="flex-1 overflow-auto pb-32">
+      <p class="text-gray-400 text-sm text-center py-8">読み込み中...</p>
     </div>
   </div>
 
@@ -703,7 +720,7 @@
       pendingReason     : null,  // 選択した理由
       pendingLineUserId : null,  // 登録申請時のLINE_ID
       commute           : null,  // 選択中の通勤手段 { label, allowance }
-      staff             : { staffId: 'S001', name: '田中 花子', commutes: [] },
+      staff             : { staffId: 'S001', name: '田中 花子', grade: 'B3', commutes: [] },
     }
 
     // ─── localStorage（途中で閉じても復帰できるセーフティネット）──────────────
@@ -924,6 +941,117 @@
       if (dateEl) dateEl.textContent = date
     }
 
+    // ─── グレードバッジ表示 ───────────────────────────────────────────────────
+    function renderGradeBadge(grade) {
+      const el = document.getElementById('staff-grade-badge')
+      if (!el) return
+      if (grade && String(grade).trim()) {
+        el.textContent = grade
+        el.classList.remove('hidden')
+      } else {
+        el.classList.add('hidden')
+      }
+    }
+
+    // ─── マニュアル: 内部URL（グレード時給表など）処理 ────────────────────────
+    function openInternal(target) {
+      if (target === 'rate-table') {
+        loadRateTable()
+      }
+    }
+
+    // ─── グレード時給表の読み込み・表示 ──────────────────────────────────────
+    async function loadRateTable() {
+      showScreen('rate-table')
+      const el = document.getElementById('rate-table-content')
+      el.innerHTML = '<p class="text-gray-400 text-sm text-center py-8">読み込み中...</p>'
+      try {
+        let data
+        if (DEV_MODE) {
+          data = {
+            headers: ['※1コマ80分', '研修', 'B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'A1', 'A2'],
+            rows: [
+              { label: 'MM(小)1:1',   values: [1488, 1488, 1518, 1548, 1578, 1608, 1638, 1908, 1938] },
+              { label: 'MM(中)1:1',   values: [1488, 1628, 1658, 1688, 1718, 1748, 1778, 2078, 2108] },
+              { label: 'MM(高)1:1',   values: [1488, 1888, 1918, 1948, 1978, 2008, 2038, 2338, 2368] },
+              { label: '一斉(少)小',  values: [1116, 1316, 1346, 1376, 1406, 1436, 1466, 1736, 1766] },
+              { label: '自立(中)',    values: [1116, 1366, 1396, 1426, 1456, 1486, 1516, 1786, 1816] },
+              { label: '補習・事務',  values: [1116, 1116, 1116, 1116, 1116, 1116, 1116, 1116, 1116] },
+              { label: '事務書類',    values: [50, 50, 50, 50, 50, 50, 50, 50, 50] },
+              { label: 'チーフ手当',  values: [2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000] },
+              { label: 'ボーナス',    values: [1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000] },
+            ],
+            myGrade: state.staff.grade || 'B3',
+          }
+        } else {
+          data = await gasGet({ action: 'getRateTable', staffId: state.staff.staffId })
+        }
+        renderRateTable(data)
+      } catch (e) {
+        el.innerHTML = '<p class="text-red-400 text-sm text-center py-8">読み込み失敗</p>'
+      }
+    }
+
+    function renderRateTable(data) {
+      const el = document.getElementById('rate-table-content')
+      if (!data || !data.rows || data.rows.length === 0) {
+        el.innerHTML = '<p class="text-gray-400 text-sm text-center py-8">時給表のデータがありません</p>'
+        return
+      }
+      const headers = data.headers || []
+      const rows    = data.rows
+      const myGrade = String(data.myGrade || '').trim()
+
+      // 自分のグレード列のインデックス（headers内、0=ラベル列、1以降がグレード列）
+      const myColIdx = myGrade
+        ? headers.findIndex((h, i) => i > 0 && String(h).trim() === myGrade)
+        : -1
+
+      // ヘッダーセル
+      const headerCells = headers.map((h, i) => {
+        const cls = (i === 0)
+          ? 'sticky left-0 top-0 bg-gray-700 text-white z-20 px-2 py-2 text-xs font-bold whitespace-nowrap text-left'
+          : (i === myColIdx
+              ? 'sticky top-0 bg-[#06C755] text-white z-10 px-2 py-2 text-xs font-bold whitespace-nowrap text-center min-w-[56px]'
+              : 'sticky top-0 bg-gray-200 text-gray-700 z-10 px-2 py-2 text-xs font-bold whitespace-nowrap text-center min-w-[56px]')
+        return `<th class="${cls}">${h}</th>`
+      }).join('')
+
+      // 行セル
+      const rowsHtml = rows.map((r, rowIdx) => {
+        const labelTd = `<th class="sticky left-0 bg-gray-100 z-10 px-2 py-1.5 text-xs font-bold whitespace-nowrap text-left">${r.label}</th>`
+        const cells = r.values.map((v, i) => {
+          const colIdx = i + 1
+          const isMy = colIdx === myColIdx
+          const fmt = (v === '' || v == null)
+            ? ''
+            : (typeof v === 'number' ? v.toLocaleString() : String(v))
+          const cls = isMy
+            ? 'bg-green-100 font-bold text-green-700 px-2 py-1.5 text-xs text-right whitespace-nowrap'
+            : 'px-2 py-1.5 text-xs text-right whitespace-nowrap'
+          return `<td class="${cls}">${fmt}</td>`
+        }).join('')
+        return `<tr class="${rowIdx % 2 === 1 ? 'bg-gray-50' : 'bg-white'}">${labelTd}${cells}</tr>`
+      }).join('')
+
+      const myGradeBadge = myGrade
+        ? `<p class="text-sm text-gray-700 mb-3">あなたのグレード: <span class="bg-[#06C755] text-white px-2 py-0.5 rounded font-bold text-sm">${myGrade}</span>${myColIdx === -1 ? ' <span class="text-xs text-amber-600">（時給表に該当なし）</span>' : ''}</p>`
+        : ''
+
+      el.innerHTML = `
+        <div class="p-3">
+          ${myGradeBadge}
+          <div class="overflow-auto border border-gray-200 rounded-lg">
+            <table class="border-collapse text-xs">
+              <thead><tr>${headerCells}</tr></thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+          </div>
+          <p class="text-[10px] text-gray-400 mt-3 text-center">※ 単位: 円 / 1コマ（80分）または 1時間</p>
+        </div>
+      `
+    }
+
     // ─── マニュアル読み込み（スプレッドシート連携） ───────────────────────────
     let cachedManual = []
     async function loadManual() {
@@ -969,23 +1097,37 @@
         <div>
           <p class="text-xs font-bold text-gray-500 mb-2">${g.category || '（その他）'}</p>
           <div class="bg-white rounded-2xl shadow-sm divide-y divide-gray-100">
-            ${g.items.map(i => i.url
-              ? `<a href="${i.url}" target="_blank"
-                   class="block p-4 active:bg-gray-50 flex justify-between items-center">
-                  <div class="flex-1 min-w-0">
-                    <p class="text-sm text-gray-800">${i.title}</p>
-                    ${i.desc ? `<p class="text-xs text-gray-500 mt-1">${i.desc}</p>` : ''}
-                  </div>
-                  <span class="text-gray-400 ml-2 flex-shrink-0">›</span>
-                </a>`
-              : `<div class="block p-4 flex justify-between items-center opacity-60">
+            ${g.items.map(i => {
+              if (i.url && i.url.startsWith('internal:')) {
+                // 内部画面（グレード時給表など）
+                const target = i.url.slice('internal:'.length)
+                return `<button onclick="openInternal('${target}')"
+                    class="w-full text-left block p-4 active:bg-gray-50 flex justify-between items-center">
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm text-gray-800">${i.title}</p>
+                      ${i.desc ? `<p class="text-xs text-gray-500 mt-1">${i.desc}</p>` : ''}
+                    </div>
+                    <span class="text-gray-400 ml-2 flex-shrink-0">›</span>
+                  </button>`
+              }
+              if (i.url) {
+                return `<a href="${i.url}" target="_blank"
+                    class="block p-4 active:bg-gray-50 flex justify-between items-center">
+                    <div class="flex-1 min-w-0">
+                      <p class="text-sm text-gray-800">${i.title}</p>
+                      ${i.desc ? `<p class="text-xs text-gray-500 mt-1">${i.desc}</p>` : ''}
+                    </div>
+                    <span class="text-gray-400 ml-2 flex-shrink-0">›</span>
+                  </a>`
+              }
+              return `<div class="block p-4 flex justify-between items-center opacity-60">
                   <div class="flex-1 min-w-0">
                     <p class="text-sm text-gray-700">${i.title}</p>
                     <p class="text-xs text-amber-600 mt-1">📝 準備中</p>
                   </div>
                   <span class="text-gray-300 ml-2 flex-shrink-0">🔒</span>
                 </div>`
-            ).join('')}
+            }).join('')}
           </div>
         </div>
       `).join('')
@@ -1917,6 +2059,7 @@
         ]
         document.getElementById('staff-name').textContent = state.staff.name + ' 先生'
         document.getElementById('avatar').textContent = state.staff.name.charAt(0)
+        renderGradeBadge(state.staff.grade)
         renderCommuteOptions(state.staff.commutes)
         loadNotices()
         restoreFromSession()  // localStorage に入室中セッションがあれば復帰
@@ -1950,11 +2093,13 @@
         state.staff = {
           staffId  : staff.staffId,
           name     : staff.name,
+          grade    : staff.grade || '',
           commutes : staff.commutes || [],
         }
 
         document.getElementById('staff-name').textContent = staff.name + ' 先生'
         document.getElementById('avatar').textContent = staff.name.charAt(0)
+        renderGradeBadge(staff.grade)
         renderCommuteOptions(staff.commutes || [])
         loadNotices()
         restoreFromSession()  // localStorage に入室中セッションがあれば復帰

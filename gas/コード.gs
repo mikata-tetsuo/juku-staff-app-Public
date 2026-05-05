@@ -162,6 +162,7 @@ function doGet(e) {
   if (action === 'getCurrentPayroll') return jsonResponse(getCurrentPayroll(e.parameter.staffId))
   if (action === 'getItems')          return jsonResponse(getItems(e.parameter.staffId))
   if (action === 'getManual')         return jsonResponse(getManual())
+  if (action === 'getRateTable')      return jsonResponse(getRateTable(e.parameter.staffId))
   return jsonResponse({ error: '不明なアクション' })
 }
 
@@ -591,6 +592,39 @@ function getManual() {
     .sort((a, b) => a.order - b.order)
 
   return { items }
+}
+
+// ============================================================
+//  グレード時給表の取得（自分のグレード情報も付与）
+// ============================================================
+
+function getRateTable(staffId) {
+  const sheet = getSheet(SHEET.RATE)
+  if (!sheet) return { headers: [], rows: [], myGrade: '' }
+
+  const data = sheet.getDataRange().getValues()
+  if (data.length === 0) return { headers: [], rows: [], myGrade: '' }
+
+  // ヘッダー行（A1のラベル + 各グレード）
+  const headers = data[0].map(v => String(v == null ? '' : v).trim())
+
+  // データ行（1列目に値があるもののみ）
+  const rows = data.slice(1)
+    .filter(r => r[0])
+    .map(r => ({
+      label : String(r[0]),
+      values: r.slice(1).map(v => v === '' || v === null ? '' : v),
+    }))
+
+  // 自分のグレード（講師マスタから）
+  let myGrade = ''
+  if (staffId) {
+    const masters = getSheet(SHEET.MASTER).getDataRange().getValues().slice(1)
+    const m = masters.find(r => String(r[1]) === String(staffId))
+    if (m) myGrade = String(m[3] || '').trim()
+  }
+
+  return { headers, rows, myGrade }
 }
 
 // ============================================================
