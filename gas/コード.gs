@@ -561,6 +561,7 @@ function getManual() {
       ['📋 業務フロー',  'comiru報告書の書き方',             '',  3, true, ''],
       ['💰 給与・規則',  '給与・締め日について',             '', 10, true, ''],
       ['💰 給与・規則',  '通勤手当・申請方法',               '', 11, true, ''],
+      ['💰 給与・規則',  'グレード時給表',  'internal:rate-table', 12, true, '自分のグレード列を緑でハイライト'],
       ['📅 シフト',      'シフトのルール',                   '', 20, true, ''],
       ['📅 シフト',      'シフト希望の出し方',               '', 21, true, ''],
       ['🚨 困った時',    '体調不良・遅刻時の対応',           '', 30, true, ''],
@@ -576,6 +577,9 @@ function getManual() {
     sheet.setColumnWidth(4, 60)
     sheet.setColumnWidth(5, 60)
     sheet.setColumnWidth(6, 220)
+  } else {
+    // 既存シートに internal: 行が無ければ自動補完（アプリ機能追加への追従）
+    ensureInternalManualEntries(sheet)
   }
 
   const rows = sheet.getDataRange().getValues().slice(1)
@@ -592,6 +596,27 @@ function getManual() {
     .sort((a, b) => a.order - b.order)
 
   return { items }
+}
+
+// ============================================================
+//  既存「マニュアル」シートに内部画面用エントリが無ければ自動追加
+//  （アプリ側で internal: で始まるURLを使う機能が増えた時、後追いで補完）
+// ============================================================
+
+function ensureInternalManualEntries(sheet) {
+  const INTERNAL_ENTRIES = [
+    ['💰 給与・規則', 'グレード時給表', 'internal:rate-table', 12, true, '自分のグレード列を緑でハイライト'],
+    // 今後追加する内部画面はここに足していく
+  ]
+
+  const existing = sheet.getDataRange().getValues().slice(1)
+  const existingUrls = new Set(existing.map(r => String(r[2] || '').trim()))
+
+  INTERNAL_ENTRIES.forEach(entry => {
+    if (!existingUrls.has(entry[2])) {
+      sheet.appendRow(entry)
+    }
+  })
 }
 
 // ============================================================
