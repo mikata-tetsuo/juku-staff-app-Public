@@ -67,6 +67,7 @@ function onOpen() {
     null,
     { name: '📊 タスク確認状況を更新',                functionName: 'updateTaskDashboard' },
     { name: '📋 お知らせ集計列を設定',                functionName: 'setupNoticeAggregation' },
+    { name: '🆔 登録申請を承認',                      functionName: 'approveRegistrations' },
     null,
     { name: '🔔 22:30リマインドトリガー設定',         functionName: 'setupEveningReminderTrigger' },
     { name: '🔑 LINEトークン登録',                    functionName: 'promptLineChannelToken' },
@@ -170,6 +171,7 @@ function doPost(e) {
     if (action === 'attendance')         return jsonResponse(saveAttendance(data))
     if (action === 'report')             return jsonResponse(saveReport(data))
     if (action === 'updateItemStatus')   return jsonResponse(updateItemStatus(data))
+    if (action === 'requestRegistration') return jsonResponse(saveRegistrationRequest(data))
     return jsonResponse({ error: '不明なアクション' })
   } catch (err) {
     return jsonResponse({ error: err.message })
@@ -532,6 +534,107 @@ function updateItemStatus({ staffId, itemId, field, value }) {
   }
 
   return { success: true }
+}
+
+// ============================================================
+//  講師登録申請を保存（未登録ユーザーがアプリから申請してきた時）
+//  シート「登録申請」: [申請日時, LINE_ID, 氏名, 申請状況, 備考]
+// ============================================================
+
+function saveRegistrationRequest({ lineUserId, name }) {
+  if (!lineUserId || !name) return { error: 'パラメータ不足' }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet()
+  let sheet = ss.getSheetByName('登録申請')
+  if (!sheet) {
+    sheet = ss.insertSheet('登録申請')
+    sheet.appendRow(['申請日時', 'LINE_ID', '氏名', '申請状況', '備考'])
+    sheet.getRange(1, 1, 1, 5).setBackground('#1565C0').setFontColor('white').setFontWeight('bold')
+    sheet.setColumnWidth(1, 140)
+    sheet.setColumnWidth(2, 280)
+    sheet.setColumnWidth(3, 120)
+    sheet.setColumnWidth(4, 100)
+    sheet.setColumnWidth(5, 200)
+  }
+
+  // 同じLINE_IDで既存申請があれば更新（重複防止）
+  const rows = sheet.getDataRange().getValues().slice(1)
+  const idx = rows.findIndex(r => String(r[1]) === String(lineUserId))
+  const now = new Date()
+
+  if (idx >= 0) {
+    sheet.getRange(idx + 2, 1).setValue(now)
+    sheet.getRange(idx + 2, 3).setValue(name)
+  } else {
+    sheet.appendRow([now, lineUserId, name, '未対応', ''])
+  }
+
+  return { success: true }
+}
+
+// ============================================================
+//  登録申請を講師マスタに承認（メニューから手動実行）
+// ============================================================
+
+function approveRegistrations() {
+  const ui = SpreadsheetApp.getUi()
+  const ss = SpreadsheetApp.getActiveSpreadsheet()
+  const reqSheet    = ss.getSheetByName('登録申請')
+  const masterSheet = ss.getSheetByName(SHEET.MASTER)
+
+  if (!reqSheet) {
+    ui.alert('「登録申請」シートが見つかりません（まだ申請がない可能性あり）')
+    return
+  }
+  if (!masterSheet) {
+    ui.alert('「講師マスタ」シートが見つかりません')
+    return
+  }
+
+  const rows = reqSheet.getDataRange().getValues().slice(1)
+  const pending = rows
+    .map((r, i) => ({ row: i + 2, time: r[0], lineUserId: r[1], name: r[2], status: r[3] }))
+    .filter(r => r.lineUserId && r.name && r.status !== '承認済')
+
+  if (pending.length === 0) {
+    ui.alert('未対応の登録申請はありません 🎉')
+    return
+  }
+
+  const list = pending.map((p, i) => `${i + 1}. ${p.name}`).join('\n')
+  const res = ui.alert(
+    '🆔 未対応の登録申請',
+    `以下を講師マスタに追加します:\n\n${list}\n\n` +
+    `※ スタッフIDは自動採番（既存の最大番号+1）\n` +
+    `※ グレード・通勤手段などは追加後に手動入力してください`,
+    ui.ButtonSet.OK_CANCEL
+  )
+  if (res !== ui.Button.OK) return
+
+  // 既存スタッフIDの最大値を取得（"S001" 形式想定）
+  const masterRows = masterSheet.getDataRange().getValues().slice(1)
+  const maxNum = masterRows
+    .map(r => String(r[1] || ''))
+    .filter(s => /^S\d+$/.test(s))
+    .reduce((max, s) => Math.max(max, parseInt(s.slice(1), 10) || 0), 0)
+
+  pending.forEach((p, i) => {
+    const newId = `S${String(maxNum + i + 1).padStart(3, '0')}`
+    // [LINE_ID, スタッフID, 氏名, グレード, メール, チーフ, 通勤1, 手当1, 通勤2, 手当2]
+    masterSheet.appendRow([p.lineUserId, newId, p.name, '', '', '', '', '', '', ''])
+    reqSheet.getRange(p.row, 4).setValue('承認済')
+    reqSheet.getRange(p.row, 5).setValue(`講師マスタ追加: ${newId} (${Utilities.formatDate(new Date(), 'Asia/Tokyo', 'M/d')})`)
+  })
+
+  ui.alert(
+    '✅ 完了',
+    `${pending.length}名を講師マスタに追加しました。\n\n` +
+    `次の手順:\n` +
+    `1. 講師マスタを開いてグレード・通勤手段等を入力\n` +
+    `2. 講師にLINEで「登録完了しました」と連絡\n` +
+    `3. 講師がアプリを再起動 → 利用可能に`,
+    ui.ButtonSet.OK
+  )
 }
 
 // ============================================================

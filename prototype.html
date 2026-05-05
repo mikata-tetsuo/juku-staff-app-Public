@@ -31,6 +31,53 @@
     <p class="text-gray-500 text-sm">LINEアカウントを確認中...</p>
   </div>
 
+  <!-- 登録申請画面（未登録ユーザー向け） -->
+  <div id="screen-register" class="screen h-full overflow-hidden">
+    <div class="bg-[#06C755] text-white px-4 pt-10 pb-4 flex-shrink-0">
+      <h2 class="text-lg font-bold">👋 はじめまして</h2>
+      <p class="text-xs opacity-75">講師登録のお申込み</p>
+    </div>
+    <div class="flex-1 overflow-y-auto px-6 py-6">
+      <div class="bg-white rounded-2xl shadow-sm p-5">
+        <p class="text-sm text-gray-700 mb-4 leading-relaxed">
+          このアプリを使うには事前登録が必要です。<br/>
+          氏名（フルネーム）を入力して登録申請してください。
+        </p>
+        <input id="register-name" type="text" placeholder="例: 田中 花子"
+          class="w-full p-3 border-2 border-gray-200 rounded-xl mb-4 text-sm focus:outline-none focus:border-[#06C755]" />
+        <button id="btn-register"
+          class="w-full py-4 bg-[#06C755] text-white font-bold rounded-2xl shadow-md active:scale-95 transition-transform">
+          📝 登録申請する
+        </button>
+        <p class="text-xs text-gray-400 mt-4 text-center leading-relaxed">
+          管理者が確認・承認後、登録完了の連絡をします。<br/>
+          通常、数時間〜1日以内に承認されます。
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 登録申請完了画面 -->
+  <div id="screen-register-done" class="screen h-full overflow-hidden">
+    <div class="bg-[#06C755] text-white px-4 pt-10 pb-4 flex-shrink-0">
+      <h2 class="text-lg font-bold">✅ 申請完了</h2>
+    </div>
+    <div class="flex-1 overflow-y-auto px-6 py-6">
+      <div class="bg-white rounded-2xl shadow-sm p-5 text-center">
+        <div class="text-5xl mb-4">📨</div>
+        <p class="text-base font-bold text-gray-800 mb-2">申請を受け付けました</p>
+        <p class="text-sm text-gray-600 leading-relaxed">
+          管理者の確認をお待ちください。<br/>
+          承認後、再度このアプリを開けば<br/>
+          ご利用いただけます。
+        </p>
+        <p class="text-xs text-gray-400 mt-6">
+          通常、数時間〜1日以内に承認されます。
+        </p>
+      </div>
+    </div>
+  </div>
+
   <!-- ホーム画面 -->
   <div id="screen-home" class="screen h-full overflow-hidden">
     <div class="bg-[#06C755] text-white px-4 pt-10 pb-4 flex-shrink-0">
@@ -723,14 +770,15 @@
 
     // ─── State ───────────────────────────────────────────────────────────────
     const state = {
-      clockInTime    : null,
-      clockInDate    : null,
-      minExitDate    : null,
-      pendingReport  : null,
-      pendingClockOut: null,  // 理由選択中に退室時刻を保持
-      pendingReason  : null,  // 選択した理由
-      commute        : null,  // 選択中の通勤手段 { label, allowance }
-      staff          : { staffId: 'S001', name: '田中 花子', commutes: [] },
+      clockInTime       : null,
+      clockInDate       : null,
+      minExitDate       : null,
+      pendingReport     : null,
+      pendingClockOut   : null,  // 理由選択中に退室時刻を保持
+      pendingReason     : null,  // 選択した理由
+      pendingLineUserId : null,  // 登録申請時のLINE_ID
+      commute           : null,  // 選択中の通勤手段 { label, allowance }
+      staff             : { staffId: 'S001', name: '田中 花子', commutes: [] },
     }
 
     // ─── localStorage（途中で閉じても復帰できるセーフティネット）──────────────
@@ -1304,6 +1352,33 @@
       showReportScreen()
     }
 
+    // 「📝 登録申請する」ボタン
+    document.getElementById('btn-register').onclick = async function () {
+      const name = document.getElementById('register-name').value.trim()
+      if (!name) { alert('氏名を入力してください'); return }
+      if (name.length < 2) { alert('氏名はフルネームで入力してください'); return }
+      const btn = this
+      btn.textContent = '送信中...'
+      btn.disabled = true
+      try {
+        if (DEV_MODE) {
+          await mockDelay(500)
+          console.log('[mock] register request:', state.pendingLineUserId, name)
+        } else {
+          await gasPost({
+            action    : 'requestRegistration',
+            lineUserId: state.pendingLineUserId,
+            name,
+          })
+        }
+        showScreen('register-done')
+      } catch (e) {
+        alert('送信に失敗しました。もう一度お試しください。')
+        btn.textContent = '📝 登録申請する'
+        btn.disabled = false
+      }
+    }
+
     // 「📲 最小化（LINEを閉じる）」ボタン
     document.getElementById('btn-minimize').onclick = function () {
       if (typeof liff !== 'undefined' && liff.closeWindow) {
@@ -1869,15 +1944,9 @@
         const staff = await gasGet({ action: 'getStaff', lineUserId })
 
         if (!staff) {
-          // 講師マスタに未登録
-          document.getElementById('screen-loading').innerHTML = `
-            <div class="text-center px-6">
-              <p class="text-4xl mb-4">🚫</p>
-              <p class="text-lg font-bold text-gray-700">登録されていません</p>
-              <p class="text-sm text-gray-500 mt-2">あなたのLINE ID：</p>
-              <p class="text-xs font-mono bg-gray-100 rounded p-2 mt-1 break-all">${lineUserId}</p>
-              <p class="text-sm text-gray-500 mt-2">このIDを講師マスタに追加してください</p>
-            </div>`
+          // 講師マスタに未登録 → 登録申請画面へ
+          state.pendingLineUserId = lineUserId
+          showScreen('register')
           return
         }
 
