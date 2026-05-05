@@ -623,6 +623,16 @@ function ensureInternalManualEntries(sheet) {
 //  グレード時給表の取得（自分のグレード情報も付与）
 // ============================================================
 
+// アプリ側で非表示にする行のラベル（部分一致）
+const HIDDEN_RATE_LABELS = [
+  '大学入試',     // 大学入試1:1, 大学入試1:2
+  '一斉(少)大',
+  '一斉(多)大',
+  '事務書類',
+  'チーフ手当',
+  'ボーナス',
+]
+
 function getRateTable(staffId) {
   const sheet = getSheet(SHEET.RATE)
   if (!sheet) return { headers: [], rows: [], myGrade: '' }
@@ -633,9 +643,13 @@ function getRateTable(staffId) {
   // ヘッダー行（A1のラベル + 各グレード）
   const headers = data[0].map(v => String(v == null ? '' : v).trim())
 
-  // データ行（1列目に値があるもののみ）
+  // データ行（1列目に値があるもの、かつ非表示ラベルでないもの）
   const rows = data.slice(1)
     .filter(r => r[0])
+    .filter(r => {
+      const label = String(r[0])
+      return !HIDDEN_RATE_LABELS.some(h => label.includes(h))
+    })
     .map(r => ({
       label : String(r[0]),
       values: r.slice(1).map(v => v === '' || v === null ? '' : v),
