@@ -425,7 +425,7 @@ function updateTaskDashboard() {
   // ヘッダー: 種別 | 項目 | 講師1 | 講師2 | ...
   const header = ['種別', '項目', ...teachers.map(t => t.name)]
   dashboard.getRange(1, 1, 1, header.length).setValues([header])
-    .setBackground('#1565C0').setFontColor('white').setFontWeight('bold')
+  dashboard.getRange(1, 1, 1, header.length).setFontWeight('bold')
 
   // 各行
   if (items.length > 0) {
@@ -450,25 +450,9 @@ function updateTaskDashboard() {
       dashboard.getRange(1, 3, rows.length + 1, teachers.length).setHorizontalAlignment('center')
     }
 
-    // 交互色（薄グレーで読みやすく）
-    for (let i = 0; i < rows.length; i++) {
-      if (i % 2 === 1) {
-        dashboard.getRange(i + 2, 1, 1, header.length).setBackground('#F5F5F5')
-      }
-    }
-
-    // 全員完了の行は薄い緑にハイライト（タスク行のみ・交互色を上書き）
-    items.forEach((item, i) => {
-      if (item.type !== 'タスク') return
-      const allDone = teachers.every(t => stateMap[t.staffId]?.[item.itemId]?.completed)
-      if (allDone) {
-        dashboard.getRange(i + 2, 1, 1, header.length).setBackground('#E8F5E9')
-      }
-    })
-
-    // 罫線（全セル）
-    dashboard.getRange(1, 1, rows.length + 1, header.length)
-      .setBorder(true, true, true, true, true, true, '#CCCCCC', SpreadsheetApp.BorderStyle.SOLID)
+    // 交互背景（緑テーマのバンディング、ヘッダーあり・フッターなし）
+    const bandingRange = dashboard.getRange(1, 1, rows.length + 1, header.length)
+    bandingRange.applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREEN, true, false)
   }
 
   // 列幅・行高さ
