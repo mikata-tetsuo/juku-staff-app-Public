@@ -322,96 +322,20 @@
     </div>
   </div>
 
-  <!-- マニュアル画面（Google Drive リンク集） -->
+  <!-- マニュアル画面（スプレッドシート連携） -->
   <div id="screen-manual" class="screen h-full overflow-hidden">
     <div class="bg-[#06C755] text-white px-4 pt-10 pb-4 flex-shrink-0">
-      <h2 class="text-lg font-bold">📖 マニュアル</h2>
-      <p class="text-xs opacity-75">タップで Google Drive を開きます</p>
+      <div class="flex justify-between items-start">
+        <div>
+          <h2 class="text-lg font-bold">📖 マニュアル</h2>
+          <p class="text-xs opacity-75">タップで Google Drive を開きます</p>
+        </div>
+        <button onclick="loadManual()" class="text-2xl active:opacity-50 leading-none mt-1 px-2"
+          title="最新に更新">🔄</button>
+      </div>
     </div>
-    <div class="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-32">
-      <!-- 業務フロー -->
-      <div>
-        <p class="text-xs font-bold text-gray-500 mb-2">📋 業務フロー</p>
-        <div class="bg-white rounded-2xl shadow-sm divide-y divide-gray-100">
-          <a href="https://drive.google.com/" target="_blank"
-            class="block p-4 active:bg-gray-50 flex justify-between items-center">
-            <span class="text-sm text-gray-800">業務フロー全体（入室→退室）</span>
-            <span class="text-gray-400">›</span>
-          </a>
-          <a href="https://drive.google.com/" target="_blank"
-            class="block p-4 active:bg-gray-50 flex justify-between items-center">
-            <span class="text-sm text-gray-800">打刻・勤務記録について</span>
-            <span class="text-gray-400">›</span>
-          </a>
-        </div>
-      </div>
-
-      <!-- 給与・規則 -->
-      <div>
-        <p class="text-xs font-bold text-gray-500 mb-2">💰 給与・規則</p>
-        <div class="bg-white rounded-2xl shadow-sm divide-y divide-gray-100">
-          <a href="https://drive.google.com/" target="_blank"
-            class="block p-4 active:bg-gray-50 flex justify-between items-center">
-            <span class="text-sm text-gray-800">給与・締め日について</span>
-            <span class="text-gray-400">›</span>
-          </a>
-          <a href="https://drive.google.com/" target="_blank"
-            class="block p-4 active:bg-gray-50 flex justify-between items-center">
-            <span class="text-sm text-gray-800">通勤手当・申請方法</span>
-            <span class="text-gray-400">›</span>
-          </a>
-        </div>
-      </div>
-
-      <!-- シフト -->
-      <div>
-        <p class="text-xs font-bold text-gray-500 mb-2">📅 シフト</p>
-        <div class="bg-white rounded-2xl shadow-sm divide-y divide-gray-100">
-          <a href="https://drive.google.com/" target="_blank"
-            class="block p-4 active:bg-gray-50 flex justify-between items-center">
-            <span class="text-sm text-gray-800">シフトのルール</span>
-            <span class="text-gray-400">›</span>
-          </a>
-          <a href="https://drive.google.com/" target="_blank"
-            class="block p-4 active:bg-gray-50 flex justify-between items-center">
-            <span class="text-sm text-gray-800">シフト希望の出し方</span>
-            <span class="text-gray-400">›</span>
-          </a>
-        </div>
-      </div>
-
-      <!-- 困った時 -->
-      <div>
-        <p class="text-xs font-bold text-gray-500 mb-2">🚨 困った時</p>
-        <div class="bg-white rounded-2xl shadow-sm divide-y divide-gray-100">
-          <a href="https://drive.google.com/" target="_blank"
-            class="block p-4 active:bg-gray-50 flex justify-between items-center">
-            <span class="text-sm text-gray-800">体調不良・遅刻時の対応</span>
-            <span class="text-gray-400">›</span>
-          </a>
-          <a href="https://drive.google.com/" target="_blank"
-            class="block p-4 active:bg-gray-50 flex justify-between items-center">
-            <span class="text-sm text-gray-800">トラブル時の連絡先</span>
-            <span class="text-gray-400">›</span>
-          </a>
-        </div>
-      </div>
-
-      <!-- 連絡先 -->
-      <div>
-        <p class="text-xs font-bold text-gray-500 mb-2">📞 連絡先</p>
-        <div class="bg-white rounded-2xl shadow-sm divide-y divide-gray-100">
-          <a href="https://drive.google.com/" target="_blank"
-            class="block p-4 active:bg-gray-50 flex justify-between items-center">
-            <span class="text-sm text-gray-800">スタッフ連絡先一覧</span>
-            <span class="text-gray-400">›</span>
-          </a>
-        </div>
-      </div>
-
-      <p class="text-[10px] text-gray-400 text-center mt-4">
-        ※ リンクは仮です。Google Driveの実URLに差し替えてください
-      </p>
+    <div id="manual-content" class="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-32">
+      <p class="text-gray-400 text-sm text-center py-8">読み込み中...</p>
     </div>
   </div>
 
@@ -966,6 +890,8 @@
         switchHistoryTab('work')
       } else if (id === 'notice') {
         loadItems()
+      } else if (id === 'manual') {
+        loadManual()
       }
     }
 
@@ -996,6 +922,73 @@
       if (el) el.textContent = time
       const dateEl = document.getElementById('header-date')
       if (dateEl) dateEl.textContent = date
+    }
+
+    // ─── マニュアル読み込み（スプレッドシート連携） ───────────────────────────
+    let cachedManual = []
+    async function loadManual() {
+      const el = document.getElementById('manual-content')
+      el.innerHTML = '<p class="text-gray-400 text-sm text-center py-8">読み込み中...</p>'
+      try {
+        if (DEV_MODE) {
+          cachedManual = [
+            { category: '📋 業務フロー', title: '業務フロー全体（入室→退室）', url: '', order: 1, desc: '' },
+            { category: '📋 業務フロー', title: '打刻・勤務記録の付け方', url: 'https://docs.google.com/', order: 2, desc: '' },
+            { category: '💰 給与・規則', title: '給与・締め日について', url: '', order: 10, desc: '' },
+            { category: '📅 シフト', title: 'シフトのルール', url: '', order: 20, desc: '' },
+          ]
+        } else {
+          const data = await gasGet({ action: 'getManual' })
+          cachedManual = data?.items || []
+        }
+        renderManual()
+      } catch (e) {
+        el.innerHTML = '<p class="text-sm text-red-400 text-center py-8">読み込み失敗</p>'
+      }
+    }
+
+    function renderManual() {
+      const el = document.getElementById('manual-content')
+      if (!cachedManual || cachedManual.length === 0) {
+        el.innerHTML = '<p class="text-sm text-gray-400 text-center py-8">マニュアルが登録されていません</p>'
+        return
+      }
+
+      // カテゴリ順にグループ化（並び順を維持）
+      const groups = []
+      const groupMap = {}
+      cachedManual.forEach(item => {
+        if (!groupMap[item.category]) {
+          groupMap[item.category] = []
+          groups.push({ category: item.category, items: groupMap[item.category] })
+        }
+        groupMap[item.category].push(item)
+      })
+
+      el.innerHTML = groups.map(g => `
+        <div>
+          <p class="text-xs font-bold text-gray-500 mb-2">${g.category || '（その他）'}</p>
+          <div class="bg-white rounded-2xl shadow-sm divide-y divide-gray-100">
+            ${g.items.map(i => i.url
+              ? `<a href="${i.url}" target="_blank"
+                   class="block p-4 active:bg-gray-50 flex justify-between items-center">
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm text-gray-800">${i.title}</p>
+                    ${i.desc ? `<p class="text-xs text-gray-500 mt-1">${i.desc}</p>` : ''}
+                  </div>
+                  <span class="text-gray-400 ml-2 flex-shrink-0">›</span>
+                </a>`
+              : `<div class="block p-4 flex justify-between items-center opacity-60">
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm text-gray-700">${i.title}</p>
+                    <p class="text-xs text-amber-600 mt-1">📝 準備中</p>
+                  </div>
+                  <span class="text-gray-300 ml-2 flex-shrink-0">🔒</span>
+                </div>`
+            ).join('')}
+          </div>
+        </div>
+      `).join('')
     }
 
     // ─── お知らせ＋タスク 統合読み込み ────────────────────────────────────────

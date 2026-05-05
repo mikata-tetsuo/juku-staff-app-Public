@@ -161,6 +161,7 @@ function doGet(e) {
   if (action === 'getPayrollHistory') return jsonResponse(getPayrollHistory(e.parameter.staffId))
   if (action === 'getCurrentPayroll') return jsonResponse(getCurrentPayroll(e.parameter.staffId))
   if (action === 'getItems')          return jsonResponse(getItems(e.parameter.staffId))
+  if (action === 'getManual')         return jsonResponse(getManual())
   return jsonResponse({ error: '不明なアクション' })
 }
 
@@ -534,6 +535,62 @@ function updateItemStatus({ staffId, itemId, field, value }) {
   }
 
   return { success: true }
+}
+
+// ============================================================
+//  マニュアル（リンク集）取得
+//  シート「マニュアル」: [カテゴリ, タイトル, URL, 並び順, 表示, 説明]
+//  ・初回は自動作成 + プレースホルダ初期データ投入
+//  ・URL空欄は「準備中」としてアプリに表示
+// ============================================================
+
+function getManual() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet()
+  let sheet = ss.getSheetByName('マニュアル')
+
+  if (!sheet) {
+    sheet = ss.insertSheet('マニュアル')
+    sheet.appendRow(['カテゴリ', 'タイトル', 'URL', '並び順', '表示', '説明'])
+    sheet.getRange(1, 1, 1, 6).setBackground('#1565C0').setFontColor('white').setFontWeight('bold')
+
+    // 初期プレースホルダ（URLは空欄、後で埋める運用）
+    const initial = [
+      ['📋 業務フロー',  '業務フロー全体（入室→退室）',     '',  1, true, ''],
+      ['📋 業務フロー',  '打刻・勤務記録の付け方',           '',  2, true, ''],
+      ['📋 業務フロー',  'comiru報告書の書き方',             '',  3, true, ''],
+      ['💰 給与・規則',  '給与・締め日について',             '', 10, true, ''],
+      ['💰 給与・規則',  '通勤手当・申請方法',               '', 11, true, ''],
+      ['📅 シフト',      'シフトのルール',                   '', 20, true, ''],
+      ['📅 シフト',      'シフト希望の出し方',               '', 21, true, ''],
+      ['🚨 困った時',    '体調不良・遅刻時の対応',           '', 30, true, ''],
+      ['🚨 困った時',    'トラブル時の連絡先',               '', 31, true, ''],
+      ['📞 連絡先',      'スタッフ連絡先一覧',               '', 40, true, ''],
+    ]
+    initial.forEach(row => sheet.appendRow(row))
+
+    // 列幅
+    sheet.setColumnWidth(1, 130)
+    sheet.setColumnWidth(2, 280)
+    sheet.setColumnWidth(3, 360)
+    sheet.setColumnWidth(4, 60)
+    sheet.setColumnWidth(5, 60)
+    sheet.setColumnWidth(6, 220)
+  }
+
+  const rows = sheet.getDataRange().getValues().slice(1)
+  const items = rows
+    .filter(r => r[1])                    // タイトル必須
+    .filter(r => r[4] !== false)          // 表示=FALSEは除外
+    .map(r => ({
+      category: String(r[0] || ''),
+      title   : String(r[1] || ''),
+      url     : String(r[2] || ''),
+      order   : Number(r[3]) || 999,
+      desc    : String(r[5] || ''),
+    }))
+    .sort((a, b) => a.order - b.order)
+
+  return { items }
 }
 
 // ============================================================
