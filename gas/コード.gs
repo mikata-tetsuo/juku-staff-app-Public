@@ -71,6 +71,7 @@ function onOpen() {
     null,
     { name: '🔔 22:30リマインドトリガー設定',         functionName: 'setupEveningReminderTrigger' },
     { name: '🔑 LINEトークン登録',                    functionName: 'promptLineChannelToken' },
+    { name: '📧 管理者メール登録（後付け通知用）',    functionName: 'promptAdminEmail' },
   ])
 }
 
@@ -863,7 +864,40 @@ function saveAttendance({ staffId, name, type, timestamp, location, commuteLabel
     reason || '',  // K列：理由（後から手動追記も可）
   ])
 
+  // 後付け打刻の場合は管理者にメール通知
+  if (reason && reason.indexOf('[後付け]') === 0) {
+    notifyAdminRetroAttendance({ staffId, name, type, date, time, reason })
+  }
+
   return { success: true, date, time }
+}
+
+// 管理者宛の後付け打刻通知メール
+function notifyAdminRetroAttendance({ staffId, name, type, date, time, reason }) {
+  const adminEmail = PropertiesService.getScriptProperties().getProperty('ADMIN_EMAIL')
+  if (!adminEmail) { Logger.log('ADMIN_EMAIL未設定: 後付け通知スキップ'); return }
+
+  const typeLabel = type === 'in' ? '入室' : '退室'
+  const subject = `【塾アプリ】後付け打刻通知: ${name} (${typeLabel} ${time})`
+  const body = [
+    `講師から後付けの打刻が登録されました。`,
+    ``,
+    `■ 講師:     ${name} (${staffId})`,
+    `■ 打刻種別: ${typeLabel}`,
+    `■ 日付:     ${date}`,
+    `■ 時刻:     ${time}`,
+    `■ 理由:     ${reason}`,
+    ``,
+    `打刻ログシートに記録されています。`,
+    `内容に問題がないか確認してください。`,
+  ].join('\n')
+
+  try {
+    MailApp.sendEmail(adminEmail, subject, body)
+    Logger.log(`後付け通知メール送信: ${adminEmail}`)
+  } catch (e) {
+    Logger.log(`後付け通知メール送信失敗: ${e}`)
+  }
 }
 
 // ============================================================
@@ -1956,6 +1990,23 @@ function promptLineChannelToken() {
   if (!token) { ui.alert('トークンが空です'); return }
   PropertiesService.getScriptProperties().setProperty('LINE_CHANNEL_TOKEN', token)
   ui.alert('✅ 登録完了！\nリマインドトリガーも設定してください。')
+}
+
+// 管理者メール（後付け打刻の通知先）を登録
+function promptAdminEmail() {
+  const ui  = SpreadsheetApp.getUi()
+  const current = PropertiesService.getScriptProperties().getProperty('ADMIN_EMAIL') || ''
+  const res = ui.prompt(
+    '📧 管理者メール登録',
+    `後付け打刻の通知を受け取るメールアドレスを入力してください：\n（現在: ${current || '未設定'}）`,
+    ui.ButtonSet.OK_CANCEL
+  )
+  if (res.getSelectedButton() !== ui.Button.OK) return
+  const email = res.getResponseText().trim()
+  if (!email) { ui.alert('メールアドレスが空です'); return }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { ui.alert('メールアドレスの形式が不正です'); return }
+  PropertiesService.getScriptProperties().setProperty('ADMIN_EMAIL', email)
+  ui.alert(`✅ 登録完了！\n${email} に後付け打刻の通知が送信されます。`)
 }
 
 // 22:30トリガーを設定（メニューから一度だけ実行）
