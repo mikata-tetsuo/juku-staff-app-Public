@@ -588,6 +588,40 @@
     </div>
   </div>
 
+  <!-- 位置情報が必要画面 -->
+  <div id="screen-need-gps" class="screen h-full overflow-hidden">
+    <div class="flex flex-col h-full p-6 pb-32 gap-4">
+      <div class="text-center pt-4">
+        <div class="text-5xl mb-3">📍</div>
+        <h2 class="text-lg font-bold text-gray-800" id="need-gps-title">位置情報が必要です</h2>
+        <p class="text-sm text-gray-600 mt-3 leading-relaxed">
+          入退室の打刻には位置情報が必要です。<br/>
+          端末の設定で位置情報をONにしてから<br/>
+          「再取得する」を押してください。
+        </p>
+      </div>
+
+      <div class="bg-yellow-50 border border-yellow-300 rounded-xl p-3 text-xs text-gray-700 leading-relaxed space-y-1">
+        <p class="font-semibold">📱 設定方法（iPhone）</p>
+        <p class="ml-3">設定 → プライバシー → 位置情報サービス → ON<br/>+ LINEの位置情報アクセスを「使用中のみ」</p>
+        <p class="font-semibold mt-2">📱 設定方法（Android）</p>
+        <p class="ml-3">設定 → 位置情報 → ON<br/>+ LINEに位置情報の権限を許可</p>
+      </div>
+
+      <p id="need-gps-err" class="hidden text-sm text-red-500 text-center"></p>
+
+      <div class="flex gap-2 flex-shrink-0 mt-auto">
+        <button onclick="cancelNeedGps()" class="flex-1 py-3 bg-gray-200 text-gray-700 font-bold rounded-xl">
+          キャンセル
+        </button>
+        <button id="btn-retry-gps" onclick="retryGetLocation()"
+          class="flex-1 py-3 bg-[#06C755] text-white font-bold rounded-xl">
+          📍 再取得する
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- 入室を忘れた（後付け修正）画面 -->
   <div id="screen-retro-clockin" class="screen h-full overflow-hidden">
     <div class="flex flex-col h-full p-6 pb-32 gap-4">
@@ -663,10 +697,56 @@
         return await new Promise(res => {
           navigator.geolocation.getCurrentPosition(
             p => res({ lat: p.coords.latitude, lng: p.coords.longitude }),
-            () => res(null), { timeout: 4000 }
+            () => res(null),
+            { timeout: 8000, enableHighAccuracy: true, maximumAge: 0 }
           )
         })
       } catch { return null }
+    }
+
+    // ─── 位置情報が必要 警告画面の状態管理 ────────────────────────────────────
+    const needGps = { type: null, callback: null, returnScreen: null }
+
+    function showNeedGpsWarning(type, callback) {
+      const currentScreen = document.querySelector('.screen.active')?.id || ''
+      needGps.type = type
+      needGps.callback = callback
+      needGps.returnScreen = currentScreen.replace('screen-', '') || 'home'
+      const titleEl = document.getElementById('need-gps-title')
+      if (titleEl) titleEl.textContent = type === 'in' ? '入室には位置情報が必要です' : '退室には位置情報が必要です'
+      const errEl = document.getElementById('need-gps-err')
+      if (errEl) errEl.classList.add('hidden')
+      const btn = document.getElementById('btn-retry-gps')
+      if (btn) { btn.textContent = '📍 再取得する'; btn.disabled = false }
+      showScreen('need-gps')
+    }
+
+    async function retryGetLocation() {
+      const btn = document.getElementById('btn-retry-gps')
+      const errEl = document.getElementById('need-gps-err')
+      btn.textContent = '取得中...'
+      btn.disabled = true
+      errEl.classList.add('hidden')
+      const loc = await getLocation()
+      btn.textContent = '📍 再取得する'
+      btn.disabled = false
+      if (loc && typeof loc.lat === 'number') {
+        const cb = needGps.callback
+        needGps.callback = null
+        needGps.type = null
+        if (cb) await cb(loc)
+      } else {
+        errEl.textContent = '位置情報を取得できませんでした。設定をご確認のうえ再試行してください。'
+        errEl.classList.remove('hidden')
+      }
+    }
+
+    function cancelNeedGps() {
+      const r = needGps.returnScreen || 'home'
+      needGps.callback = null
+      needGps.type = null
+      needGps.returnScreen = null
+      showScreen(r)
     }
 
     // ─── 遠隔打刻 警告ダイアログの状態管理 ────────────────────────────────────
@@ -1489,31 +1569,35 @@
     // ─── 入室 ────────────────────────────────────────────────────────────────
     async function clockIn() {
       const btn = document.getElementById('btn-clock-in')
-      btn.textContent = '処理中...'
+      btn.textContent = '位置情報取得中...'
       btn.disabled = true
 
-      // 位置情報取得（任意）
-      let location = null
-      try {
-        location = await new Promise(res => {
-          navigator.geolocation.getCurrentPosition(
-            p => res({ lat: p.coords.latitude, lng: p.coords.longitude }),
-            () => res(null), { timeout: 4000 }
-          )
-        })
-      } catch {}
+      // 位置情報取得（必須）
+      const location = await getLocation()
 
+      if (!location) {
+        btn.textContent = '🟢 入室する'
+        btn.disabled = false
+        showNeedGpsWarning('in', async (loc) => {
+          await processClockInWithLocation(loc)
+        })
+        return
+      }
+
+      await processClockInWithLocation(location)
+    }
+
+    async function processClockInWithLocation(location) {
       // 塾から離れている場合は警告画面で理由選択
       const dCheck = isAwayFromJuku(location)
       if (dCheck && dCheck.isAway) {
-        btn.textContent = '🟢 入室する'
-        btn.disabled = false
+        const btn = document.getElementById('btn-clock-in')
+        if (btn) { btn.textContent = '🟢 入室する'; btn.disabled = false }
         showFarWarning('in', location, dCheck.distance, async (reason) => {
           await processClockIn(location, reason)
         })
         return
       }
-
       await processClockIn(location, '')
     }
 
@@ -1745,8 +1829,19 @@
       if (errEl)   errEl.classList.add('hidden')
       if (homeErr) homeErr.classList.add('hidden')
 
-      // ── 位置情報取得＋塾から離れているかチェック ──
+      // ── 位置情報取得（必須） ──
       const location = await getLocation()
+      if (!location) {
+        showNeedGpsWarning('out', async (loc) => {
+          await processClockOutWithLocation(loc, now)
+        })
+        return
+      }
+
+      await processClockOutWithLocation(location, now)
+    }
+
+    async function processClockOutWithLocation(location, now) {
       state.exitLocation = location
       const dCheck = isAwayFromJuku(location)
       if (dCheck && dCheck.isAway) {
