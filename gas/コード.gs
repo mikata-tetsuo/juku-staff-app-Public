@@ -669,6 +669,48 @@ function saveRegistrationRequest({ lineUserId, name }) {
   if (!lineUserId || !name) return { error: 'パラメータ不足' }
 
   const ss = SpreadsheetApp.getActiveSpreadsheet()
+  const masterSheet = ss.getSheetByName(SHEET.MASTER)
+  const masterRows  = masterSheet ? masterSheet.getDataRange().getValues().slice(1) : []
+  const normalize   = n => String(n || '').replace(/[\s　]+/g, '').trim()
+  const targetName  = normalize(name)
+  const today       = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'M/d')
+
+  // ① LINE_ID が既に講師マスタにある？ → 既登録
+  const existingByLineId = masterRows.findIndex(mr =>
+    mr[0] && String(mr[0]) === String(lineUserId)
+  )
+  if (existingByLineId >= 0) {
+    const staffId = String(masterRows[existingByLineId][1] || '')
+    saveToRegistrationRequestSheet(lineUserId, name, '既登録', `既に登録済み: ${staffId} (${today})`)
+    return { success: true, status: 'already-registered', staffId }
+  }
+
+  // ② 講師マスタに同氏名 + LINE_ID 空の行がある？ → 自動承認（マスタA列を直接更新）
+  const candidates = masterRows
+    .map((mr, i) => ({ mr, i }))
+    .filter(({ mr }) => normalize(mr[2]) === targetName)
+  const emptyIdMatch = candidates.find(c => !c.mr[0])
+  if (emptyIdMatch) {
+    const staffId = String(emptyIdMatch.mr[1] || '')
+    masterSheet.getRange(emptyIdMatch.i + 2, 1).setValue(lineUserId)
+    saveToRegistrationRequestSheet(lineUserId, name, '自動承認', `既存行 ${staffId} に自動登録 (${today})`)
+    return { success: true, status: 'auto-approved', staffId }
+  }
+
+  // ③ 同姓同名で別LINE_ID既登録 → 要確認（手動承認に回す）
+  let memo = ''
+  if (candidates.length > 0) {
+    memo = `同姓同名 ${String(candidates[0].mr[1] || '')} あり、要確認`
+  }
+
+  // ④ 完全新規 or 同姓同名コンフリクト → 「未対応」で登録申請に保存（手動承認）
+  saveToRegistrationRequestSheet(lineUserId, name, '未対応', memo)
+  return { success: true, status: 'pending' }
+}
+
+// 登録申請シートに保存（ヘルパー：同じLINE_IDがあれば更新、なければ追加）
+function saveToRegistrationRequestSheet(lineUserId, name, status, memo) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet()
   let sheet = ss.getSheetByName('登録申請')
   if (!sheet) {
     sheet = ss.insertSheet('登録申請')
@@ -681,7 +723,6 @@ function saveRegistrationRequest({ lineUserId, name }) {
     sheet.setColumnWidth(5, 200)
   }
 
-  // 同じLINE_IDで既存申請があれば更新（重複防止）
   const rows = sheet.getDataRange().getValues().slice(1)
   const idx = rows.findIndex(r => String(r[1]) === String(lineUserId))
   const now = new Date()
@@ -689,11 +730,11 @@ function saveRegistrationRequest({ lineUserId, name }) {
   if (idx >= 0) {
     sheet.getRange(idx + 2, 1).setValue(now)
     sheet.getRange(idx + 2, 3).setValue(name)
+    sheet.getRange(idx + 2, 4).setValue(status)
+    sheet.getRange(idx + 2, 5).setValue(memo || '')
   } else {
-    sheet.appendRow([now, lineUserId, name, '未対応', ''])
+    sheet.appendRow([now, lineUserId, name, status, memo || ''])
   }
-
-  return { success: true }
 }
 
 // ============================================================

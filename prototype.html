@@ -68,10 +68,25 @@
   <!-- 登録申請完了画面 -->
   <div id="screen-register-done" class="screen h-full overflow-hidden">
     <div class="bg-[#06C755] text-white px-4 pt-10 pb-4 flex-shrink-0">
-      <h2 class="text-lg font-bold">✅ 申請完了</h2>
+      <h2 class="text-lg font-bold" id="register-done-header">✅ 申請完了</h2>
     </div>
     <div class="flex-1 overflow-y-auto px-6 py-6">
-      <div class="bg-white rounded-2xl shadow-sm p-5 text-center">
+      <!-- 自動承認時 -->
+      <div id="register-done-auto" class="hidden bg-white rounded-2xl shadow-sm p-5 text-center">
+        <div class="text-5xl mb-4">🎉</div>
+        <p class="text-base font-bold text-gray-800 mb-2">登録完了！</p>
+        <p class="text-sm text-gray-600 leading-relaxed">
+          登録が完了しました。<br/>
+          下のボタンでアプリを開き直してください。
+        </p>
+        <button id="btn-reload-after-register"
+          class="mt-5 w-full py-3 bg-[#06C755] text-white font-bold rounded-xl">
+          🔄 アプリを開き直す
+        </button>
+      </div>
+
+      <!-- 手動承認待ち時 -->
+      <div id="register-done-pending" class="hidden bg-white rounded-2xl shadow-sm p-5 text-center">
         <div class="text-5xl mb-4">📨</div>
         <p class="text-base font-bold text-gray-800 mb-2">申請を受け付けました</p>
         <p class="text-sm text-gray-600 leading-relaxed">
@@ -81,6 +96,15 @@
         </p>
         <p class="text-xs text-gray-400 mt-6">
           通常、数時間〜1日以内に承認されます。
+        </p>
+      </div>
+
+      <!-- 確認中 -->
+      <div id="register-done-checking" class="bg-white rounded-2xl shadow-sm p-5 text-center">
+        <div class="text-5xl mb-4">⏳</div>
+        <p class="text-base font-bold text-gray-800 mb-2">登録を確認中...</p>
+        <p class="text-sm text-gray-600 leading-relaxed">
+          少々お待ちください
         </p>
       </div>
     </div>
@@ -1810,6 +1834,18 @@
       const btn = this
       btn.textContent = '送信中...'
       btn.disabled = true
+
+      // まず「確認中」画面を表示
+      const autoEl     = document.getElementById('register-done-auto')
+      const pendEl     = document.getElementById('register-done-pending')
+      const checkEl    = document.getElementById('register-done-checking')
+      const headerEl   = document.getElementById('register-done-header')
+      autoEl.classList.add('hidden')
+      pendEl.classList.add('hidden')
+      checkEl.classList.remove('hidden')
+      headerEl.textContent = '⏳ 確認中...'
+      showScreen('register-done')
+
       try {
         if (DEV_MODE) {
           await mockDelay(500)
@@ -1820,13 +1856,46 @@
             lineUserId: state.pendingLineUserId,
             name,
           })
+          // GAS処理を待ってから getStaffByLineId で自動承認確認
+          await mockDelay(1500)
         }
-        showScreen('register-done')
+
+        // 講師マスタにLINE_IDが追加されたか確認
+        let staff = null
+        if (!DEV_MODE) {
+          try {
+            staff = await gasGet({ action: 'getStaff', lineUserId: state.pendingLineUserId })
+          } catch {}
+        }
+
+        checkEl.classList.add('hidden')
+        if (staff && staff.staffId) {
+          // 自動承認成功
+          autoEl.classList.remove('hidden')
+          headerEl.textContent = '✅ 登録完了'
+        } else {
+          // 手動承認待ち
+          pendEl.classList.remove('hidden')
+          headerEl.textContent = '✅ 申請完了'
+        }
+        btn.textContent = '📝 登録申請する'
+        btn.disabled = false
       } catch (e) {
         alert('送信に失敗しました。もう一度お試しください。')
+        checkEl.classList.add('hidden')
+        pendEl.classList.remove('hidden')
+        headerEl.textContent = '✅ 申請完了'
         btn.textContent = '📝 登録申請する'
         btn.disabled = false
       }
+    }
+
+    // 「🔄 アプリを開き直す」ボタン（自動承認後）
+    document.getElementById('btn-reload-after-register').onclick = function () {
+      if (typeof liff !== 'undefined' && liff.closeWindow) {
+        try { liff.closeWindow(); return } catch (e) { console.warn(e) }
+      }
+      location.reload()
     }
 
     // 「📲 最小化（LINEを閉じる）」ボタン
