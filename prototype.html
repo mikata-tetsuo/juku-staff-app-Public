@@ -827,9 +827,15 @@
 
     function cancelNeedGps() {
       const r = needGps.returnScreen || 'home'
+      const wasOut = needGps.type === 'out'
       needGps.callback = null
       needGps.type = null
       needGps.returnScreen = null
+      // 退室の流れだった場合はロック解除
+      if (wasOut) {
+        state.clockingOut = false
+        setClockOutButtonsProcessing(false)
+      }
       showScreen(r)
     }
 
@@ -904,6 +910,9 @@
         } else {
           renderHomeMode('during')
         }
+        // 退室ロック解除
+        state.clockingOut = false
+        setClockOutButtonsProcessing(false)
       }
       farWarning.type = null
       farWarning.callback = null
@@ -937,6 +946,7 @@
       pendingReason     : null,  // 選択した理由
       pendingLineUserId : null,  // 登録申請時のLINE_ID
       commute           : null,  // 選択中の通勤手段 { label, allowance }
+      clockingOut       : false, // 退室処理中フラグ（二重押し防止）
       staff             : { staffId: 'S001', name: '田中 花子', grade: 'B3', commutes: [] },
     }
 
@@ -1972,7 +1982,28 @@
     // ─── 退室 ────────────────────────────────────────────────────────────────
     const fmtTime = d => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
 
+    // 退室ボタン（home/done両方）を「処理中」表示／復帰
+    function setClockOutButtonsProcessing(processing) {
+      ;['btn-clock-out', 'btn-clock-out-home'].forEach(id => {
+        const btn = document.getElementById(id)
+        if (!btn) return
+        if (processing) {
+          btn.textContent = '処理中...'
+          btn.disabled = true
+        } else {
+          btn.textContent = '🟢 退室する'
+          btn.disabled = false
+          btn.className = 'w-full py-5 bg-[#06C755] text-white text-xl font-bold rounded-2xl shadow-md active:scale-95 transition-all'
+        }
+      })
+    }
+
     async function clockOut() {
+      // 二重押し防止：処理中なら無視
+      if (state.clockingOut) return
+      state.clockingOut = true
+      setClockOutButtonsProcessing(true)
+
       const now      = new Date()
       const errEl    = document.getElementById('early-exit-err')
       const homeErr  = document.getElementById('home-early-exit-err')
@@ -1983,21 +2014,32 @@
         const txt    = `⚠️ ${minStr} 以降に退室してください`
         if (errEl)   { errEl.textContent = txt;   errEl.classList.remove('hidden') }
         if (homeErr) { homeErr.textContent = txt; homeErr.classList.remove('hidden') }
+        // ロック解除（再度押せるように）
+        state.clockingOut = false
+        setClockOutButtonsProcessing(false)
         return
       }
       if (errEl)   errEl.classList.add('hidden')
       if (homeErr) homeErr.classList.add('hidden')
 
-      // ── 位置情報取得（必須） ──
-      const location = await getLocation()
-      if (!location) {
-        showNeedGpsWarning('out', async (loc) => {
-          await processClockOutWithLocation(loc, now)
-        })
-        return
-      }
+      try {
+        // ── 位置情報取得（必須） ──
+        const location = await getLocation()
+        if (!location) {
+          // GPS必須警告へ。続行 or キャンセルでロック解除する
+          showNeedGpsWarning('out', async (loc) => {
+            await processClockOutWithLocation(loc, now)
+          })
+          return
+        }
 
-      await processClockOutWithLocation(location, now)
+        await processClockOutWithLocation(location, now)
+      } catch (e) {
+        // 例外時はロック解除
+        state.clockingOut = false
+        setClockOutButtonsProcessing(false)
+        throw e
+      }
     }
 
     async function processClockOutWithLocation(location, now) {

@@ -895,11 +895,33 @@ function saveAttendance({ staffId, name, type, timestamp, location, commuteLabel
   const time  = formatTime(now)
   const lat   = location ? location.lat : ''
   const lng   = location ? location.lng : ''
+  const typeLabel = type === 'in' ? '出勤' : '退勤'
+
+  // 二重押し防止：同一スタッフ・同一打刻種別が直近5秒以内にあればスキップ
+  // （後付け修正は除外：reason に [後付け] が付くケースは新規行として記録する）
+  const isRetro = reason && reason.indexOf('[後付け]') === 0
+  if (!isRetro) {
+    const lastRow = sheet.getLastRow()
+    const checkFrom = Math.max(2, lastRow - 9)  // 直近10行を確認
+    if (lastRow >= checkFrom) {
+      const recent = sheet.getRange(checkFrom, 1, lastRow - checkFrom + 1, 4).getValues()
+      const cutoff = Date.now() - 5000  // 5秒前
+      const dup = recent.find(r =>
+        String(r[1]) === String(staffId) &&
+        String(r[3]) === typeLabel &&
+        r[0] instanceof Date && r[0].getTime() >= cutoff
+      )
+      if (dup) {
+        Logger.log(`二重打刻スキップ: ${staffId} ${typeLabel} (${time})`)
+        return { success: true, skipped: true, date, time }
+      }
+    }
+  }
 
   // ヘッダー: [タイムスタンプ, スタッフID, 氏名, 打刻種別, 日付, 時刻, 緯度, 経度, 通勤手段, 通勤手当, 備考]
   sheet.appendRow([
     new Date(), staffId, name,
-    type === 'in' ? '出勤' : '退勤',
+    typeLabel,
     date, time, lat, lng,
     commuteLabel || '', commuteAllowance || 0,
     reason || '',  // K列：理由（後から手動追記も可）
