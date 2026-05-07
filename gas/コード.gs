@@ -959,6 +959,24 @@ function saveAttendance({ staffId, name, type, timestamp, location, commuteLabel
 
 function saveReport({ staffId, name, date, lessons, clockInTime, clockOutTime, V }) {
   const sheet = getSheet(SHEET.RECORD)
+
+  // 二重押し防止：同一スタッフ・同一日付の勤務記録が直近10秒以内にあればスキップ
+  const lastRow = sheet.getLastRow()
+  const checkFrom = Math.max(2, lastRow - 19)  // 直近20行を確認（複数授業まとめて挿入されるため）
+  if (lastRow >= checkFrom) {
+    const recent = sheet.getRange(checkFrom, 1, lastRow - checkFrom + 1, 4).getValues()
+    const cutoff = Date.now() - 10000  // 10秒前
+    const dup = recent.find(r =>
+      String(r[1]) === String(staffId) &&
+      String(r[3]) === String(date) &&
+      r[0] instanceof Date && r[0].getTime() >= cutoff
+    )
+    if (dup) {
+      Logger.log(`勤務記録の二重送信スキップ: ${staffId} ${date}`)
+      return { success: true, skipped: true }
+    }
+  }
+
   lessons.forEach(lesson => {
     sheet.appendRow([
       new Date(), staffId, name, date,
