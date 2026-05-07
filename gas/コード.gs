@@ -845,7 +845,7 @@ function approveRegistrations() {
   // 既存スタッフIDの最大値（新規作成用）
   const maxNum = masterRows
     .map(r => String(r[1] || ''))
-    .filter(s => /^S\d+$/.test(s))
+    .filter(s => /^P\d+$/.test(s))
     .reduce((max, s) => Math.max(max, parseInt(s.slice(1), 10) || 0), 0)
 
   const today = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'M/d')
@@ -858,7 +858,7 @@ function approveRegistrations() {
       reqSheet.getRange(d.reqRow, 4).setValue('承認済')
       reqSheet.getRange(d.reqRow, 5).setValue(`既存行 ${d.staffId} に登録 (${today})`)
     } else if (d.action === 'create') {
-      const newId = `S${String(maxNum + (++newCounter)).padStart(3, '0')}`
+      const newId = `P${String(maxNum + (++newCounter)).padStart(3, '0')}`
       masterSheet.appendRow([d.lineUserId, newId, d.name, '', '', '', '', '', '', ''])
       reqSheet.getRange(d.reqRow, 4).setValue('承認済')
       reqSheet.getRange(d.reqRow, 5).setValue(`講師マスタ新規追加: ${newId} (${today})`)
