@@ -273,7 +273,7 @@
       <div id="home-mode-after-record" class="hidden space-y-3">
         <!-- 完了サマリー（コンパクト） -->
         <div class="bg-gray-100 rounded-2xl shadow-sm p-3 border-l-4 border-[#06C755]">
-          <p class="text-sm text-gray-700 font-semibold">✅ 入室・授業・報告・勤務記録 完了</p>
+          <p id="home-summary-completed" class="text-sm text-gray-700 font-semibold">✅ 入室・授業・報告・勤務記録 完了</p>
           <p class="text-xs text-gray-500 mt-1">
             <span id="summary-clock-in">--:--</span> 入室・<span id="summary-elapsed">--</span>経過
           </p>
@@ -889,6 +889,11 @@
 
     // ─── ホーム画面のモード切替 ───────────────────────────────────────────────
     let homeElapsedInterval = null
+    // 社員グレードかどうか（社員は勤務記録入力なし、入室→直接退室）
+    function isShain() {
+      return state.staff?.grade === '社員'
+    }
+
     function renderHomeMode(mode) {
       const before = document.getElementById('home-mode-before')
       const during = document.getElementById('home-mode-during')
@@ -898,6 +903,17 @@
       before.classList.add('hidden')
       during.classList.add('hidden')
       after.classList.add('hidden')
+
+      // 社員は'during'ではなく直接'after-record'モードへ
+      if (mode === 'during' && isShain()) mode = 'after-record'
+
+      // 完了サマリーの文言を社員/一般で出し分け
+      const summaryEl = document.getElementById('home-summary-completed')
+      if (summaryEl) {
+        summaryEl.textContent = isShain()
+          ? '✅ 入室 完了'
+          : '✅ 入室・授業・報告・勤務記録 完了'
+      }
 
       if (mode === 'during') {
         during.classList.remove('hidden')
@@ -1628,7 +1644,8 @@
       // セッションを localStorage に保存（途中で閉じても復帰できるように）
       saveSession()
 
-      // 入室OKオーバーレイ → ホーム（授業中モード）へ
+      // 入室OKオーバーレイ → ホームへ
+      // ※ 社員は勤務記録なしで直接退室できるよう 'after-record' に行く（renderHomeMode 内で自動振り分け）
       const overlay = document.getElementById('overlay-clockin')
       document.getElementById('overlay-time').textContent = timeStr + ' 入室'
       overlay.classList.remove('hidden')
@@ -1636,6 +1653,12 @@
         overlay.classList.add('hidden')
         renderHomeMode('during')
         showScreen('home')
+        // 社員は最低退室時刻なしで即退室可 → 退室ボタンを有効化するため exit time check を開始
+        if (isShain()) {
+          state.minExitDate = null
+          saveSession()
+          startExitTimeCheck()
+        }
       }, 1500)
     }
 
@@ -1757,6 +1780,11 @@
           } else {
             renderHomeMode('during')
             showScreen('home')
+            if (isShain()) {
+              state.minExitDate = null
+              saveSession()
+              startExitTimeCheck()
+            }
           }
         }, 1500)
       } catch (e) {
@@ -2328,6 +2356,13 @@
 
       if (state.pendingReport && state.minExitDate) {
         // 勤務記録送信済み → ホームの退室待ちモードへ
+        document.getElementById('home-early-exit-err').classList.add('hidden')
+        document.getElementById('home-exit-ok-banner').classList.add('hidden')
+        renderHomeMode('after-record')
+        showScreen('home')
+        startExitTimeCheck()
+      } else if (isShain()) {
+        // 社員：勤務記録なしで直接退室待ちモード
         document.getElementById('home-early-exit-err').classList.add('hidden')
         document.getElementById('home-exit-ok-banner').classList.add('hidden')
         renderHomeMode('after-record')
