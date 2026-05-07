@@ -600,6 +600,7 @@ function getManual() {
 function ensureInternalManualEntries(sheet) {
   const INTERNAL_ENTRIES = [
     ['💰 給与・規則', 'グレード時給表', 'internal:rate-table', 12, true, '自分のグレード列を緑でハイライト'],
+    ['📋 業務フロー', 'アプリを楽に開く方法', 'internal:shortcut-guide', 4, true, 'お気に入り登録／ホーム画面ショートカットの作り方'],
     // 今後追加する内部画面はここに足していく
   ]
 
