@@ -892,16 +892,30 @@
       }
       // 距離も付加
       const fullReason = `📍遠隔(${fmtDistance(farWarning.distance)}) ${reason}`
+      // ボタンに「送信中」表示
+      const btn = document.getElementById('btn-confirm-far')
+      if (btn) {
+        btn.textContent = '📤 送信中...'
+        btn.disabled = true
+        btn.classList.add('pulse')
+      }
       const cb = farWarning.callback
       farWarning.callback = null
-      if (cb) await cb(fullReason)
+      try {
+        if (cb) await cb(fullReason)
+      } finally {
+        if (btn) {
+          btn.textContent = 'この理由で打刻'
+          btn.disabled = false
+          btn.classList.remove('pulse')
+        }
+      }
     }
 
     function cancelFarWarning() {
       // 入室ボタンの状態を元に戻す（入室時のキャンセル）
       if (farWarning.type === 'in') {
-        const btn = document.getElementById('btn-clock-in')
-        if (btn) { btn.textContent = '🟢 入室する'; btn.disabled = false }
+        setClockInButtonProcessing(false)
         renderHomeMode('before')
       } else {
         // 退室キャンセル：状態に応じて戻る（記録送信済 → ホーム後段、未送信 → 授業中）
@@ -1122,12 +1136,11 @@
         nav.classList.remove('hidden')
       }
 
-      // ホーム表示時に「処理中...」が残っていたら入室ボタンを初期状態に戻す
+      // ホーム表示時に処理中表示が残っていたら入室ボタンを初期状態に戻す
       if (id === 'home') {
         const btn = document.getElementById('btn-clock-in')
-        if (btn && btn.textContent === '処理中...') {
-          btn.textContent = '🟢 入室する'
-          btn.disabled = false
+        if (btn && btn.disabled && btn.textContent !== '🟢 入室する') {
+          setClockInButtonProcessing(false)
         }
       }
 
@@ -1679,17 +1692,30 @@
     }
 
     // ─── 入室 ────────────────────────────────────────────────────────────────
-    async function clockIn() {
+    function setClockInButtonProcessing(processing, label = '⏳ 問合せ中...') {
       const btn = document.getElementById('btn-clock-in')
-      btn.textContent = '位置情報取得中...'
-      btn.disabled = true
+      if (!btn) return
+      if (processing) {
+        btn.textContent = label
+        btn.disabled = true
+        btn.className = 'w-full py-4 bg-gray-500 text-white text-lg font-bold rounded-xl shadow transition-transform pulse'
+      } else {
+        btn.textContent = '🟢 入室する'
+        btn.disabled = false
+        btn.classList.remove('pulse')
+        btn.className = 'w-full py-4 bg-[#06C755] text-white text-lg font-bold rounded-xl shadow active:scale-95 transition-transform'
+      }
+    }
+
+    async function clockIn() {
+      // ステージ①：位置情報取得中
+      setClockInButtonProcessing(true, '📍 位置情報取得中...')
 
       // 位置情報取得（必須）
       const location = await getLocation()
 
       if (!location) {
-        btn.textContent = '🟢 入室する'
-        btn.disabled = false
+        setClockInButtonProcessing(false)
         showNeedGpsWarning('in', async (loc) => {
           await processClockInWithLocation(loc)
         })
@@ -1703,13 +1729,16 @@
       // 塾から離れている場合は警告画面で理由選択
       const dCheck = isAwayFromJuku(location)
       if (dCheck && dCheck.isAway) {
-        const btn = document.getElementById('btn-clock-in')
-        if (btn) { btn.textContent = '🟢 入室する'; btn.disabled = false }
+        setClockInButtonProcessing(false)
         showFarWarning('in', location, dCheck.distance, async (reason) => {
+          // 警告経由で続行 → 送信中に切替
+          setClockInButtonProcessing(true, '📤 送信中...')
           await processClockIn(location, reason)
         })
         return
       }
+      // ステージ②：送信中
+      setClockInButtonProcessing(true, '📤 送信中...')
       await processClockIn(location, '')
     }
 
@@ -1982,17 +2011,19 @@
     // ─── 退室 ────────────────────────────────────────────────────────────────
     const fmtTime = d => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
 
-    // 退室ボタン（home/done両方）を「処理中」表示／復帰
-    function setClockOutButtonsProcessing(processing) {
+    // 退室ボタン（home/done両方）を「処理中」表示／復帰（label でステージを切替）
+    function setClockOutButtonsProcessing(processing, label = '⏳ 問合せ中...') {
       ;['btn-clock-out', 'btn-clock-out-home'].forEach(id => {
         const btn = document.getElementById(id)
         if (!btn) return
         if (processing) {
-          btn.textContent = '処理中...'
+          btn.textContent = label
           btn.disabled = true
+          btn.className = 'w-full py-5 bg-gray-500 text-white text-xl font-bold rounded-2xl shadow-md transition-all pulse'
         } else {
           btn.textContent = '🟢 退室する'
           btn.disabled = false
+          btn.classList.remove('pulse')
           btn.className = 'w-full py-5 bg-[#06C755] text-white text-xl font-bold rounded-2xl shadow-md active:scale-95 transition-all'
         }
       })
@@ -2002,7 +2033,8 @@
       // 二重押し防止：処理中なら無視
       if (state.clockingOut) return
       state.clockingOut = true
-      setClockOutButtonsProcessing(true)
+      // ステージ①：位置情報取得中
+      setClockOutButtonsProcessing(true, '📍 位置情報取得中...')
 
       const now      = new Date()
       const errEl    = document.getElementById('early-exit-err')
@@ -2033,6 +2065,8 @@
           return
         }
 
+        // ステージ②：送信中
+        setClockOutButtonsProcessing(true, '📤 送信中...')
         await processClockOutWithLocation(location, now)
       } catch (e) {
         // 例外時はロック解除
@@ -2115,17 +2149,19 @@
         ? `${state.farReasonOut} / ${reason}`
         : reason
       const btn = document.getElementById('btn-confirm-reason')
-      btn.textContent = '処理中...'
+      btn.textContent = '📤 送信中...'
       btn.disabled = true
+      btn.classList.add('pulse')
       await submitClockOut(state.pendingClockOut, combined)
       btn.textContent = '🟢 退室する'
       btn.disabled = false
+      btn.classList.remove('pulse')
     }
 
     // ── 退室処理（共通）──
     async function submitClockOut(now, reason) {
-      const btn = document.getElementById('btn-clock-out')
-      if (btn) { btn.textContent = '処理中...'; btn.disabled = true }
+      // 両ボタンを送信中表示に
+      setClockOutButtonsProcessing(true, '📤 送信中...')
 
       if (DEV_MODE) {
         await mockDelay(500)
@@ -2169,6 +2205,9 @@
     let backToHomeTimer = null
     function backToHome() {
       if (backToHomeTimer) { clearInterval(backToHomeTimer); backToHomeTimer = null }
+      // 退室サイクル完了 → ロック解除
+      state.clockingOut = false
+      setClockOutButtonsProcessing(false)
       // 退室後はお知らせ最新化のために再読込
       if (typeof loadItems === 'function') loadItems()
       renderHomeMode('before')
