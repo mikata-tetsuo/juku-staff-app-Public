@@ -301,6 +301,10 @@
           <p class="text-xs text-gray-500 mt-1">
             <span id="summary-clock-in">--:--</span> 入室・<span id="summary-elapsed">--</span>経過
           </p>
+          <button onclick="editReport()"
+            class="mt-2 w-full text-xs text-gray-500 underline py-1 active:text-gray-700 text-center">
+            📝 勤務記録を修正する
+          </button>
         </div>
 
         <!-- ⑤ 退室（メイン） -->
@@ -1114,11 +1118,11 @@
       state.commute = commutes[idx]
       commutes.forEach((_, i) => {
         const btn = document.getElementById(`commute-btn-${i}`)
-        if (i === idx) {
-          btn.className = btn.className.replace('bg-white text-gray-600 border-gray-300', 'bg-[#06C755] text-white border-[#06C755]')
-        } else {
-          btn.className = btn.className.replace('bg-[#06C755] text-white border-[#06C755]', 'bg-white text-gray-600 border-gray-300')
-        }
+        if (!btn) return
+        const on  = ['bg-[#06C755]', 'text-white', 'border-[#06C755]']
+        const off = ['bg-white', 'text-gray-600', 'border-gray-300']
+        if (i === idx) { btn.classList.add(...on);  btn.classList.remove(...off) }
+        else           { btn.classList.add(...off); btn.classList.remove(...on) }
       })
     }
 
@@ -1380,28 +1384,28 @@
               if (i.url && i.url.startsWith('internal:')) {
                 // 内部画面（グレード時給表など）
                 const target = i.url.slice('internal:'.length)
-                return `<button onclick="openInternal('${target}')"
+                return `<button onclick="openInternal('${esc(target)}')"
                     class="w-full text-left block p-4 active:bg-gray-50 flex justify-between items-center">
                     <div class="flex-1 min-w-0">
-                      <p class="text-sm text-gray-800">${i.title}</p>
-                      ${i.desc ? `<p class="text-xs text-gray-500 mt-1">${i.desc}</p>` : ''}
+                      <p class="text-sm text-gray-800">${esc(i.title)}</p>
+                      ${i.desc ? `<p class="text-xs text-gray-500 mt-1">${esc(i.desc)}</p>` : ''}
                     </div>
                     <span class="text-gray-400 ml-2 flex-shrink-0">›</span>
                   </button>`
               }
               if (i.url) {
-                return `<a href="${i.url}" target="_blank"
+                return `<a href="${esc(i.url)}" target="_blank"
                     class="block p-4 active:bg-gray-50 flex justify-between items-center">
                     <div class="flex-1 min-w-0">
-                      <p class="text-sm text-gray-800">${i.title}</p>
-                      ${i.desc ? `<p class="text-xs text-gray-500 mt-1">${i.desc}</p>` : ''}
+                      <p class="text-sm text-gray-800">${esc(i.title)}</p>
+                      ${i.desc ? `<p class="text-xs text-gray-500 mt-1">${esc(i.desc)}</p>` : ''}
                     </div>
                     <span class="text-gray-400 ml-2 flex-shrink-0">›</span>
                   </a>`
               }
               return `<div class="block p-4 flex justify-between items-center opacity-60">
                   <div class="flex-1 min-w-0">
-                    <p class="text-sm text-gray-700">${i.title}</p>
+                    <p class="text-sm text-gray-700">${esc(i.title)}</p>
                     <p class="text-xs text-amber-600 mt-1">📝 準備中</p>
                   </div>
                   <span class="text-gray-300 ml-2 flex-shrink-0">🔒</span>
@@ -1535,10 +1539,10 @@
             ${completeBtn}
             <div class="flex-1 min-w-0">
               <p class="text-sm ${txtCls}">
-                ${i.text}
-                ${i.date ? `<span class="text-xs text-gray-400 ml-1">${i.date}</span>` : ''}
+                ${esc(i.text)}
+                ${i.date ? `<span class="text-xs text-gray-400 ml-1">${esc(i.date)}</span>` : ''}
               </p>
-              ${i.dueDate ? `<p class="text-[11px] text-gray-400 mt-0.5">〆切: ${i.dueDate}</p>` : ''}
+              ${i.dueDate ? `<p class="text-[11px] text-gray-400 mt-0.5">〆切: ${esc(i.dueDate)}</p>` : ''}
             </div>
           </div>`
       }).join('')
@@ -1600,11 +1604,11 @@
         el.innerHTML = records.map(r => `
           <div class="mx-4 my-3 bg-white rounded-2xl shadow-sm p-4">
             <div class="flex justify-between items-center mb-2">
-              <span class="font-bold text-gray-800">${r.date}</span>
-              <span class="text-sm text-gray-500">${r.clockIn} 〜 ${r.clockOut}</span>
+              <span class="font-bold text-gray-800">${esc(r.date)}</span>
+              <span class="text-sm text-gray-500">${esc(r.clockIn)} 〜 ${esc(r.clockOut)}</span>
             </div>
-            <p class="text-sm text-gray-600">${r.lessons}</p>
-            <p class="text-xs text-right text-[#06C755] font-semibold mt-1">勤務合計 ${r.total}</p>
+            <p class="text-sm text-gray-600">${esc(r.lessons)}</p>
+            <p class="text-xs text-right text-[#06C755] font-semibold mt-1">勤務合計 ${esc(r.total)}</p>
           </div>`).join('')
       } catch (e) {
         el.innerHTML = '<p class="text-red-400 text-sm text-center p-8">読み込みに失敗しました</p>'
@@ -1838,11 +1842,10 @@
       commutes.forEach((_, i) => {
         const btn = document.getElementById(`retro-commute-btn-${i}`)
         if (!btn) return
-        if (i === idx) {
-          btn.className = 'px-4 py-2 rounded-full text-sm font-semibold border-2 transition-all bg-[#06C755] text-white border-[#06C755]'
-        } else {
-          btn.className = 'px-4 py-2 rounded-full text-sm font-semibold border-2 transition-all bg-white text-gray-600 border-gray-300'
-        }
+        const on  = ['bg-[#06C755]', 'text-white', 'border-[#06C755]']
+        const off = ['bg-white', 'text-gray-600', 'border-gray-300']
+        if (i === idx) { btn.classList.add(...on);  btn.classList.remove(...off) }
+        else           { btn.classList.add(...off); btn.classList.remove(...on) }
       })
     }
 
@@ -2371,7 +2374,7 @@
       return `
         <div id="lesson-${idx}" class="bg-white rounded-xl p-4 shadow-sm border border-gray-100 space-y-3">
           <div class="flex justify-between items-center">
-            <span class="text-sm font-bold text-gray-700">授業 ${idx + 1}</span>
+            <span class="text-sm font-bold text-gray-700 lesson-label">授業 ${idx + 1}</span>
             ${idx > 0 ? `<button onclick="removeLesson(${idx})" class="text-red-400 text-xs font-medium">削除</button>` : ''}
           </div>
           <select onchange="onTypeChange(${idx},this.value)"
@@ -2389,6 +2392,11 @@
 
     function removeLesson(idx) {
       document.getElementById(`lesson-${idx}`).remove()
+      document.querySelectorAll('[id^="lesson-"]').forEach((card, i) => {
+        if (!card.id.match(/^lesson-\d+$/)) return
+        const label = card.querySelector('.lesson-label')
+        if (label) label.textContent = `授業 ${i + 1}`
+      })
     }
 
     function showReportScreen() {
@@ -2405,7 +2413,7 @@
 
       document.getElementById('z-check-msg').classList.add('hidden')
       const btn = document.getElementById('btn-submit-report')
-      btn.textContent = '勤務記録を送信する'
+      btn.textContent = state.pendingReport ? '勤務記録を更新する' : '勤務記録を送信する'
       btn.disabled = false
       showScreen('report')
     }
@@ -2428,11 +2436,16 @@
         const type = card.querySelector('.type-sel')?.value
         if (!type) return
         const typeLabel = TYPE_LABELS[type] || type
-        if (type === 'MM1:1' || type === 'MM1:2') {
+        if (type === 'MM1:1') {
           const grade  = card.querySelector('.grade-sel')?.value || ''
           const target = card.querySelector('.name-inp')?.value || ''
           const amount = parseFloat(card.querySelector('.koma-sel')?.value || 0)
           result.push({ typeLabel, grade, target, amount, unit: 'コマ' })
+        } else if (type === 'MM1:2') {
+          const grades  = [...card.querySelectorAll('.grade-sel')].map(e => e.value || '')
+          const targets = [...card.querySelectorAll('.name-inp')].map(e => e.value || '')
+          const amount  = parseFloat(card.querySelector('.koma-sel')?.value || 0)
+          result.push({ typeLabel, grade: grades.join('/'), target: targets.filter(Boolean).join('/'), amount, unit: 'コマ' })
         } else if (type === 'isshosho' || type === 'isshoota') {
           const grade  = card.querySelector('.grade-sel')?.value || ''
           const target = card.querySelector('.class-inp')?.value || ''
@@ -2539,9 +2552,48 @@
       startExitTimeCheck()
     }
 
+    // ─── 勤務記録の修正（退室前に再編集） ────────────────────────────────────
+    function pendingReportToDraft() {
+      const typeReverse = Object.fromEntries(Object.entries(TYPE_LABELS).map(([k, v]) => [v, k]))
+      const lessons = (state.pendingReport?.lessons || []).map(l => {
+        const type = typeReverse[l.typeLabel] || ''
+        const d = { type }
+        if (type === 'MM1:1') {
+          d['grade-sel'] = l.grade
+          d['name-inp']  = l.target
+          d['koma-sel']  = String(l.amount)
+        } else if (type === 'MM1:2') {
+          const grades  = l.grade.split('/')
+          const targets = l.target.split('/')
+          d['grade-sel'] = [grades[0] || '', grades[1] || '']
+          d['name-inp']  = [targets[0] || '', targets[1] || '']
+          d['koma-sel']  = String(l.amount)
+        } else if (type === 'isshosho' || type === 'isshoota') {
+          d['grade-sel'] = l.grade
+          d['class-inp'] = l.target
+          d['hour-sel']  = String(l.amount)
+        } else {
+          d['grade-sel'] = l.grade || ''
+          d['hour-sel']  = String(l.amount)
+        }
+        return d
+      })
+      return { lessons }
+    }
+
+    function editReport() {
+      // state.pendingReport の内容をドラフト形式に変換して localStorage に書き戻す
+      const draft = pendingReportToDraft()
+      try { localStorage.setItem(STORAGE.DRAFT, JSON.stringify(draft)) } catch {}
+      showReportScreen()
+    }
+
     // ─── Utils ───────────────────────────────────────────────────────────────
     function mockDelay(ms) {
       return new Promise(r => setTimeout(r, ms))
+    }
+    function esc(str) {
+      return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
     }
 
     // ─── localStorage からの復帰（途中で閉じた人を正しい画面に戻す）───────────

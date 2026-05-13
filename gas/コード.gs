@@ -71,7 +71,13 @@ function onOpen() {
     null,
     { name: '🔔 22:30リマインドトリガー設定',         functionName: 'setupEveningReminderTrigger' },
     { name: '🔑 LINEトークン登録',                    functionName: 'promptLineChannelToken' },
+    { name: '🏫 校舎名登録',                          functionName: 'promptBranchName' },
   ])
+}
+
+// 校舎名を取得（未設定なら「西明石」）
+function getBranchName() {
+  return PropertiesService.getScriptProperties().getProperty('BRANCH_NAME') || '西明石'
 }
 
 // 修正バッチ：nightlyBatch を手動実行 + 完了ダイアログ
@@ -2015,7 +2021,7 @@ function eveningReminder() {
     const lineUserId = lineIdMap[staffId]
     if (!lineUserId) return
 
-    let msg = '【中谷塾 西明石】\n'
+    let msg = `【中谷塾 ${getBranchName()}】\n`
     if (!s.hasRecord) {
       msg += '勤務記録と退室打刻を入力してください🙏'  // 記録も退室もなし
     } else {
@@ -2061,6 +2067,22 @@ function promptLineChannelToken() {
   if (!token) { ui.alert('トークンが空です'); return }
   PropertiesService.getScriptProperties().setProperty('LINE_CHANNEL_TOKEN', token)
   ui.alert('✅ 登録完了！\nリマインドトリガーも設定してください。')
+}
+
+// 校舎名を登録（メニューから実行。コピーした大久保用シートで「大久保」を設定）
+function promptBranchName() {
+  const ui  = SpreadsheetApp.getUi()
+  const cur = getBranchName()
+  const res = ui.prompt(
+    '🏫 校舎名登録',
+    `この教室の校舎名を入力してください（例: 西明石／大久保）\n現在の設定: ${cur}`,
+    ui.ButtonSet.OK_CANCEL
+  )
+  if (res.getSelectedButton() !== ui.Button.OK) return
+  const name = res.getResponseText().trim()
+  if (!name) { ui.alert('校舎名が空です'); return }
+  PropertiesService.getScriptProperties().setProperty('BRANCH_NAME', name)
+  ui.alert(`✅ 校舎名を「${name}」に設定しました。\nリマインド通知の冒頭が【中谷塾 ${name}】になります。`)
 }
 
 
