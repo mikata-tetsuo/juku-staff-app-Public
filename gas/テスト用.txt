@@ -1,0 +1,56 @@
+// ============================================================
+//  ローカルテスト用（本番デプロイ前に確認）
+// ============================================================
+
+function testGetStaff() {
+  const e = { parameter: { action: 'getStaff', lineUserId: 'テスト用LINE_ID' } }
+  Logger.log(JSON.stringify(doGet(e).getContent()))
+}
+
+function testGetNotices() {
+  const e = { parameter: { action: 'getNotices' } }
+  Logger.log(JSON.stringify(doGet(e).getContent()))
+}
+
+function testGetHistory() {
+  const e = { parameter: { action: 'getHistory', staffId: 'S998' } }
+  Logger.log(JSON.stringify(doGet(e).getContent()))
+}
+
+function testNightlyBatch() {
+  nightlyBatch()
+  Logger.log('nightlyBatch 完了')
+}
+
+function requestDrivePermission() {
+  DriveApp.getRootFolder()
+  Logger.log('Drive権限OK')
+}
+
+// 通常のナイトリーバッチ（今日の日付で実行）
+// → testNightlyBatch() で既にOK
+
+// 20日〆の月次処理テスト（21日処理を強制実行）
+function testMonthlyProcess() {
+  const ss      = SpreadsheetApp.getActiveSpreadsheet()
+  const today   = new Date()
+
+  // マスタ読み込み
+  const masters = ss.getSheetByName(SHEET.MASTER)
+    .getDataRange().getValues().slice(1).filter(r => r[0])
+
+  // 前期間（前月21日〜今月20日）
+  const prevEnd   = new Date(today.getFullYear(), today.getMonth(),     20)
+  const prevStart = new Date(today.getFullYear(), today.getMonth() - 1, 21)
+
+  Logger.log(`月次処理テスト: ${formatDate(prevStart)}〜${formatDate(prevEnd)}`)
+
+  recordPayrollHistory(ss, masters, prevStart, prevEnd)
+  Logger.log('給与履歴記録 完了')
+
+  monthlyBackup(ss, prevEnd)
+  Logger.log('月次バックアップ 完了')
+
+  autoMonthlyUpdate(ss, today)
+  Logger.log('翌月シート更新 完了')
+}

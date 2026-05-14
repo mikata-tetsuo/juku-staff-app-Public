@@ -895,68 +895,82 @@ function approveRegistrations() {
 // ============================================================
 
 function saveAttendance({ staffId, name, type, timestamp, location, commuteLabel, commuteAllowance, reason }) {
-  const sheet = getSheet(SHEET.CLOCK)
-  const now   = new Date(timestamp)
-  const date  = formatDate(now)
-  const time  = formatTime(now)
-  const lat   = location ? location.lat : ''
-  const lng   = location ? location.lng : ''
-  const typeLabel = type === 'in' ? '出勤' : '退勤'
+  // 同時書き込みによるロスト防止：シート書き込みを直列化
+  const lock = LockService.getScriptLock()
+  try {
+    lock.waitLock(15000)  // 最大15秒待機
+  } catch (e) {
+    Logger.log(`saveAttendance ロック取得失敗: ${staffId} ${type} - ${e}`)
+    throw new Error('処理が混雑しています。もう一度お試しください。')
+  }
+  try {
+    const sheet = getSheet(SHEET.CLOCK)
+    const now   = new Date(timestamp)
+    const date  = formatDate(now)
+    const time  = formatTime(now)
+    const lat   = location ? location.lat : ''
+    const lng   = location ? location.lng : ''
+    const typeLabel = type === 'in' ? '出勤' : '退勤'
 
-  // 二重押し防止：同一スタッフ・同一打刻種別が直近5秒以内にあればスキップ
-  // （後付け修正は除外：reason に [後付け] が付くケースは新規行として記録する）
-  const isRetro = reason && reason.indexOf('[後付け]') === 0
-  if (!isRetro) {
-    const lastRow = sheet.getLastRow()
-    const checkFrom = Math.max(2, lastRow - 9)  // 直近10行を確認
-    if (lastRow >= checkFrom) {
-      const recent = sheet.getRange(checkFrom, 1, lastRow - checkFrom + 1, 4).getValues()
-      const cutoff = Date.now() - 5000  // 5秒前
-      const dup = recent.find(r =>
-        String(r[1]) === String(staffId) &&
-        String(r[3]) === typeLabel &&
-        r[0] instanceof Date && r[0].getTime() >= cutoff
-      )
-      if (dup) {
-        Logger.log(`二重打刻スキップ: ${staffId} ${typeLabel} (${time})`)
-        return { success: true, skipped: true, date, time }
+    // 二重押し防止：同一スタッフ・同一打刻種別が直近5秒以内にあればスキップ
+    // （後付け修正は除外：reason に [後付け] が付くケースは新規行として記録する）
+    const isRetro = reason && reason.indexOf('[後付け]') === 0
+    if (!isRetro) {
+      const lastRow = sheet.getLastRow()
+      const checkFrom = Math.max(2, lastRow - 9)  // 直近10行を確認
+      if (lastRow >= checkFrom) {
+        const recent = sheet.getRange(checkFrom, 1, lastRow - checkFrom + 1, 4).getValues()
+        const cutoff = Date.now() - 5000  // 5秒前
+        const dup = recent.find(r =>
+          String(r[1]) === String(staffId) &&
+          String(r[3]) === typeLabel &&
+          r[0] instanceof Date && r[0].getTime() >= cutoff
+        )
+        if (dup) {
+          Logger.log(`二重打刻スキップ: ${staffId} ${typeLabel} (${time})`)
+          return { success: true, skipped: true, date, time }
+        }
       }
     }
-  }
 
-  // ヘッダー: [タイムスタンプ, スタッフID, 氏名, 打刻種別, 日付, 時刻, 緯度, 経度, 通勤手段, 通勤手当, 備考]
-  sheet.appendRow([
-    new Date(), staffId, name,
-    typeLabel,
-    date, time, lat, lng,
-    commuteLabel || '', commuteAllowance || 0,
-    reason || '',  // K列：理由（後から手動追記も可）
-  ])
+    // ヘッダー: [タイムスタンプ, スタッフID, 氏名, 打刻種別, 日付, 時刻, 緯度, 経度, 通勤手段, 通勤手当, 備考]
+    sheet.appendRow([
+      new Date(), staffId, name,
+      typeLabel,
+      date, time, lat, lng,
+      commuteLabel || '', commuteAllowance || 0,
+      reason || '',  // K列：理由（後から手動追記も可）
+    ])
+    SpreadsheetApp.flush()  // 書き込みを即時確定（ロック解放前に永続化を保証）
 
-  // 後付け打刻の場合は管理者にメール通知
-  if (reason && reason.indexOf('[後付け]') === 0) {
-    const typeLabel = type === 'in' ? '入室' : '退室'
-    const subject = `【塾アプリ】後付け打刻通知: ${name} (${typeLabel} ${time})`
-    const body = [
-      `講師から後付けの打刻が登録されました。`,
-      ``,
-      `■ 講師:     ${name} (${staffId})`,
-      `■ 打刻種別: ${typeLabel}`,
-      `■ 日付:     ${date}`,
-      `■ 時刻:     ${time}`,
-      `■ 理由:     ${reason}`,
-      ``,
-      `打刻ログシートに記録されています。`,
-      `内容に問題がないか確認してください。`,
-    ].join('\n')
-    try {
-      sendAdminMail(subject, body)
-    } catch (e) {
-      Logger.log(`後付け通知メール送信失敗: ${e}`)
+    // 後付け打刻の場合は管理者にメール通知
+    if (reason && reason.indexOf('[後付け]') === 0) {
+      const typeLabelJa = type === 'in' ? '入室' : '退室'
+      const subject = `【塾アプリ】後付け打刻通知: ${name} (${typeLabelJa} ${time})`
+      const body = [
+        `講師から後付けの打刻が登録されました。`,
+        ``,
+        `■ 講師:     ${name} (${staffId})`,
+        `■ 打刻種別: ${typeLabelJa}`,
+        `■ 日付:     ${date}`,
+        `■ 時刻:     ${time}`,
+        `■ 理由:     ${reason}`,
+        ``,
+        `打刻ログシートに記録されています。`,
+        `内容に問題がないか確認してください。`,
+      ].join('\n')
+      try {
+        sendAdminMail(subject, body)
+      } catch (e) {
+        Logger.log(`後付け通知メール送信失敗: ${e}`)
+      }
     }
-  }
 
-  return { success: true, date, time }
+    Logger.log(`打刻保存完了: ${staffId} ${typeLabel} ${date} ${time}`)
+    return { success: true, date, time }
+  } finally {
+    lock.releaseLock()
+  }
 }
 
 // ============================================================
@@ -964,34 +978,49 @@ function saveAttendance({ staffId, name, type, timestamp, location, commuteLabel
 // ============================================================
 
 function saveReport({ staffId, name, date, lessons, clockInTime, clockOutTime, V }) {
-  const sheet = getSheet(SHEET.RECORD)
-
-  // 二重押し防止：同一スタッフ・同一日付の勤務記録が直近10秒以内にあればスキップ
-  const lastRow = sheet.getLastRow()
-  const checkFrom = Math.max(2, lastRow - 19)  // 直近20行を確認（複数授業まとめて挿入されるため）
-  if (lastRow >= checkFrom) {
-    const recent = sheet.getRange(checkFrom, 1, lastRow - checkFrom + 1, 4).getValues()
-    const cutoff = Date.now() - 10000  // 10秒前
-    const dup = recent.find(r =>
-      String(r[1]) === String(staffId) &&
-      String(r[3]) === String(date) &&
-      r[0] instanceof Date && r[0].getTime() >= cutoff
-    )
-    if (dup) {
-      Logger.log(`勤務記録の二重送信スキップ: ${staffId} ${date}`)
-      return { success: true, skipped: true }
-    }
+  // 同時書き込みによるロスト防止：シート書き込みを直列化
+  const lock = LockService.getScriptLock()
+  try {
+    lock.waitLock(15000)  // 最大15秒待機
+  } catch (e) {
+    Logger.log(`saveReport ロック取得失敗: ${staffId} ${date} - ${e}`)
+    throw new Error('処理が混雑しています。もう一度お試しください。')
   }
+  try {
+    const sheet = getSheet(SHEET.RECORD)
 
-  lessons.forEach(lesson => {
-    sheet.appendRow([
-      new Date(), staffId, name, date,
-      lesson.typeLabel, lesson.grade || '', lesson.target || '',
-      lesson.amount, lesson.unit,
-      clockInTime || '', clockOutTime || '', V || '',
-    ])
-  })
-  return { success: true }
+    // 二重押し防止：同一スタッフ・同一日付の勤務記録が直近10秒以内にあればスキップ
+    const lastRow = sheet.getLastRow()
+    const checkFrom = Math.max(2, lastRow - 19)  // 直近20行を確認（複数授業まとめて挿入されるため）
+    if (lastRow >= checkFrom) {
+      const recent = sheet.getRange(checkFrom, 1, lastRow - checkFrom + 1, 4).getValues()
+      const cutoff = Date.now() - 10000  // 10秒前
+      const dup = recent.find(r =>
+        String(r[1]) === String(staffId) &&
+        String(r[3]) === String(date) &&
+        r[0] instanceof Date && r[0].getTime() >= cutoff
+      )
+      if (dup) {
+        Logger.log(`勤務記録の二重送信スキップ: ${staffId} ${date}`)
+        return { success: true, skipped: true }
+      }
+    }
+
+    lessons.forEach(lesson => {
+      sheet.appendRow([
+        new Date(), staffId, name, date,
+        lesson.typeLabel, lesson.grade || '', lesson.target || '',
+        lesson.amount, lesson.unit,
+        clockInTime || '', clockOutTime || '', V || '',
+      ])
+    })
+    SpreadsheetApp.flush()  // 書き込みを即時確定（ロック解放前に永続化を保証）
+
+    Logger.log(`勤務記録保存完了: ${staffId} ${date} (${lessons.length}件)`)
+    return { success: true }
+  } finally {
+    lock.releaseLock()
+  }
 }
 
 // ============================================================
