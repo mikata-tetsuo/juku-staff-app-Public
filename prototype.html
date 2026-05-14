@@ -1750,27 +1750,9 @@
       const now     = new Date()
       const timeStr = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
 
-      if (DEV_MODE) {
-        await mockDelay(500)
-        console.log('[mock] 入室:', { time: now.toISOString(), location, reason })
-      } else {
-        await gasPost({
-          action          : 'attendance',
-          staffId         : state.staff.staffId,
-          name            : state.staff.name,
-          type            : 'in',
-          timestamp       : now.toISOString(),
-          location,
-          commuteLabel    : state.commute?.label    || '',
-          commuteAllowance: state.commute?.allowance || 0,
-          reason          : reason || '',
-        })
-      }
-
+      // ── 楽観的 UI: 即座に状態更新 + 画面表示（送信は裏で）──
       state.clockInTime = timeStr
       state.clockInDate = now
-
-      // セッションを localStorage に保存（途中で閉じても復帰できるように）
       saveSession()
 
       // 入室OKオーバーレイ → ホームへ
@@ -1789,6 +1771,29 @@
           startExitTimeCheck()
         }
       }, 1500)
+
+      // ── 裏で送信 ──
+      try {
+        if (DEV_MODE) {
+          await mockDelay(500)
+          console.log('[mock] 入室:', { time: now.toISOString(), location, reason })
+        } else {
+          await gasPost({
+            action          : 'attendance',
+            staffId         : state.staff.staffId,
+            name            : state.staff.name,
+            type            : 'in',
+            timestamp       : now.toISOString(),
+            location,
+            commuteLabel    : state.commute?.label    || '',
+            commuteAllowance: state.commute?.allowance || 0,
+            reason          : reason || '',
+          })
+        }
+      } catch (e) {
+        console.error('入室送信失敗:', e)
+        alert('⚠ 入室の送信に失敗しました。塾長にご連絡いただくか、再度お試しください。')
+      }
     }
 
     document.getElementById('btn-clock-in').onclick = clockIn
@@ -2163,45 +2168,49 @@
 
     // ── 退室処理（共通）──
     async function submitClockOut(now, reason) {
-      // 両ボタンを送信中表示に
-      setClockOutButtonsProcessing(true, '📤 送信中...')
-
-      if (DEV_MODE) {
-        await mockDelay(500)
-        console.log('[mock] 退室:', { time: now.toISOString(), reason })
-        if (state.pendingReport) console.log('[mock] 勤務記録送信:', state.pendingReport)
-      } else {
-        await Promise.all([
-          gasPost({
-            action           : 'attendance',
-            staffId          : state.staff.staffId,
-            name             : state.staff.name,
-            type             : 'out',
-            timestamp        : now.toISOString(),
-            location         : state.exitLocation || null,
-            commuteLabel     : state.commute?.label     || '',
-            commuteAllowance : state.commute?.allowance || 0,
-            reason,
-          }),
-          state.pendingReport ? gasPost({
-            ...state.pendingReport,
-            clockOutTime: fmtTime(now),
-            reason,
-          }) : Promise.resolve(),
-        ])
-      }
-
-      // 全 localStorage をクリア（退室完了で1サイクル終了）
-      clearSession()
-      clearDraft()
-
-      // 退室後の表示へ
+      // ── 楽観的 UI: 退室完了画面を即表示（送信は裏で）──
       document.getElementById('done-before-out').classList.add('hidden')
       document.getElementById('done-after-out').classList.remove('hidden')
       showScreen('done')
 
       // 15秒カウントダウン → 自動でホーム（お知らせ確認等のため）
       startBackToHomeCountdown(15)
+
+      // ── 裏で送信 ──
+      try {
+        if (DEV_MODE) {
+          await mockDelay(500)
+          console.log('[mock] 退室:', { time: now.toISOString(), reason })
+          if (state.pendingReport) console.log('[mock] 勤務記録送信:', state.pendingReport)
+        } else {
+          await Promise.all([
+            gasPost({
+              action           : 'attendance',
+              staffId          : state.staff.staffId,
+              name             : state.staff.name,
+              type             : 'out',
+              timestamp        : now.toISOString(),
+              location         : state.exitLocation || null,
+              commuteLabel     : state.commute?.label     || '',
+              commuteAllowance : state.commute?.allowance || 0,
+              reason,
+            }),
+            state.pendingReport ? gasPost({
+              ...state.pendingReport,
+              clockOutTime: fmtTime(now),
+              reason,
+            }) : Promise.resolve(),
+          ])
+        }
+
+        // 送信成功 → セッション・下書きクリア（退室完了で1サイクル終了）
+        clearSession()
+        clearDraft()
+      } catch (e) {
+        console.error('退室送信失敗:', e)
+        alert('⚠ 退室の送信に失敗しました。塾長に退室時刻をご連絡ください。')
+        // 失敗時はセッションを残す → 復帰可能
+      }
     }
 
     // 退室後の「ホームに戻る」ハンドリング（手動 or 自動）
