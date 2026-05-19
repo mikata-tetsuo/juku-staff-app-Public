@@ -1265,7 +1265,11 @@ function nightlyBatch() {
     if (!vMap[staffId])         vMap[staffId] = {}
     vMap[staffId][date] = parseFloat(V) || 0
 
-    const key = `${typeLabel}_${grade || ''}`
+    // MM 1:2 など複数生徒の場合、grade が "中学生/中学生" のような
+    // スラッシュ区切りになるため、最初の学年でマッピング
+    // （実運用では2人とも同学年のことが多いため、これで十分カバーできる）
+    const normalizedGrade = (grade || '').split('/')[0].trim()
+    const key = `${typeLabel}_${normalizedGrade}`
     const col = COL_MAP[key] || COL_MAP[`${typeLabel}_`]
     if (!col) return
     recMap[staffId][date][col] = (recMap[staffId][date][col] || 0) + (parseFloat(amount) || 0)
