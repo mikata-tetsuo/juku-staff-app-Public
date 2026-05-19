@@ -2620,6 +2620,20 @@
         showScreen('home')
         return
       }
+      // 昨日以前のセッションは捨てる（退室後に clearSession が走らなかった等の保険）
+      // → これがないと、翌日アプリを開くと前日の「退勤待ち」状態が復元されて重複打刻バグの原因になる
+      const sessionClockIn = new Date(session.clockInDate)
+      const now = new Date()
+      const isSameDay = sessionClockIn.getFullYear() === now.getFullYear() &&
+                        sessionClockIn.getMonth()    === now.getMonth() &&
+                        sessionClockIn.getDate()     === now.getDate()
+      if (!isSameDay) {
+        console.log('古いセッション破棄:', session.clockInDate)
+        clearSession(); clearDraft()
+        renderHomeMode('before')
+        showScreen('home')
+        return
+      }
       // state を復元
       state.clockInTime   = session.clockInTime
       state.clockInDate   = new Date(session.clockInDate)
