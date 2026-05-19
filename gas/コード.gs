@@ -1265,10 +1265,16 @@ function nightlyBatch() {
     if (!vMap[staffId])         vMap[staffId] = {}
     vMap[staffId][date] = parseFloat(V) || 0
 
-    // MM 1:2 など複数生徒の場合、grade が "中学生/中学生" のような
-    // スラッシュ区切りになるため、最初の学年でマッピング
-    // （実運用では2人とも同学年のことが多いため、これで十分カバーできる）
-    const normalizedGrade = (grade || '').split('/')[0].trim()
+    // MM 1:2 など複数生徒の場合、grade が "中学生/中学生" や "小学生/中学生" のような
+    // スラッシュ区切りになる。給与上、上の学年の単価で支給するため、最も高い学年でマッピング。
+    //   例: 小学生/中学生 → 中学生
+    //       中学生/高校生 → 高校生
+    //       中学生/中学生 → 中学生
+    const gradeOrder = { '小学生': 1, '中学生': 2, '高校生': 3 }
+    const normalizedGrade = (grade || '').split('/')
+      .map(g => g.trim())
+      .filter(g => g)
+      .reduce((max, g) => (gradeOrder[g] || 0) > (gradeOrder[max] || 0) ? g : max, '')
     const key = `${typeLabel}_${normalizedGrade}`
     const col = COL_MAP[key] || COL_MAP[`${typeLabel}_`]
     if (!col) return
