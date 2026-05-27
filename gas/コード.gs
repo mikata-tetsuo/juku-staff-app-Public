@@ -61,8 +61,11 @@ function onEdit(e) {
 function onOpen() {
   SpreadsheetApp.getActiveSpreadsheet().addMenu('🏫 塾管理', [
     { name: '🔄 修正バッチ実行（Z異常を再チェック）', functionName: 'runFixBatch' },
+    { name: '🧹 講師シート AB列+余分色クリア（全員）', functionName: 'clearStaleStaffData' },
     null,
     { name: '📅 月次更新（手動）',                    functionName: 'monthlyUpdate' },
+    { name: '📧 本社へ明細メール送信（手動）',         functionName: 'sendMonthlyMailManual' },
+    { name: '🚨 5月分バックアップ再作成・再送信',      functionName: 'recoverMayBackup' },
     { name: '🛡 テンプレート保護設定',                functionName: 'protectTemplateFormulas' },
     null,
     { name: '📊 タスク確認状況を更新',                functionName: 'updateTaskDashboard' },
@@ -78,6 +81,25 @@ function onOpen() {
 // 校舎名を取得（未設定なら「西明石」）
 function getBranchName() {
   return PropertiesService.getScriptProperties().getProperty('BRANCH_NAME') || '西明石'
+}
+
+// 講師シート全員の AB列（備考）と AB以降の余分フォーマットをクリア
+// 21日更新後に AB列が前月のデータで汚染された場合に使用
+function clearStaleStaffData() {
+  const ss      = SpreadsheetApp.getActiveSpreadsheet()
+  const masters = getSheet(SHEET.MASTER).getDataRange().getValues().slice(1)
+  let count     = 0
+  masters.forEach(master => {
+    const name = master[2]
+    if (!name) return
+    const sheet = ss.getSheetByName(name)
+    if (!sheet) return
+    sheet.getRange(DATA_START_ROW, 28, DATA_MAX_ROWS, 1).clearContent()  // AB（備考）
+    sheet.getRange(DATA_START_ROW, 29, DATA_MAX_ROWS, 10).clearFormat()  // AC以降の余分な色
+    count++
+  })
+  SpreadsheetApp.getUi().alert(`完了: ${count}名の講師シートをクリアしました。`)
+  Logger.log(`clearStaleStaffData 完了: ${count}名`)
 }
 
 // 修正バッチ：nightlyBatch を手動実行 + 完了ダイアログ
@@ -1359,6 +1381,9 @@ function nightlyBatch() {
     }
   })
 
+  // ── 書き込みを確定してからスナップショット ──
+  SpreadsheetApp.flush()
+
   // ── 毎日：日次スナップショット ──
   dailySnapshot(ss)
 
@@ -1651,23 +1676,25 @@ function monthlyBackup(ss, endDate) {
   const fileName = `アルバイト明細_${label}`
   const folder   = getBackupSubFolder(ss, 'monthly')
 
-  // 既存バックアップチェック
-  if (folder.getFilesByName(fileName).hasNext()) {
-    Logger.log(`月次バックアップ済み: ${fileName}`)
-    return
+  // バックアップ作成（既存の場合は再利用してメールだけ送る）
+  let backupFile
+  const iter = folder.getFilesByName(fileName)
+  if (iter.hasNext()) {
+    backupFile = iter.next()
+    Logger.log(`月次バックアップ既存（再利用）: ${fileName}`)
+  } else {
+    backupFile = DriveApp.getFileById(ss.getId()).makeCopy(fileName, folder)
+    Logger.log(`月次バックアップ作成: ${fileName}`)
   }
 
-  // コピー作成
-  const backupFile = DriveApp.getFileById(ss.getId()).makeCopy(fileName, folder)
-  Logger.log(`月次バックアップ作成: ${fileName}`)
-
-  // Excelに変換してメール送信
+  // Excelに変換してメール送信（'本社' フラグ行のみ）
   const url      = `https://docs.google.com/spreadsheets/d/${backupFile.getId()}/export?format=xlsx`
   const token    = ScriptApp.getOAuthToken()
   const response = UrlFetchApp.fetch(url, { headers: { Authorization: `Bearer ${token}` } })
   const xlsxBlob = response.getBlob().setName(`${fileName}.xlsx`)
 
   const adminRows = getSheet(SHEET.ADMIN).getDataRange().getValues().slice(1)
+  let sentCount = 0
   adminRows
     .filter(r => r[2] === true || r[2] === '✓' || r[2] === '本社')
     .forEach(row => {
@@ -1675,11 +1702,16 @@ function monthlyBackup(ss, endDate) {
       GmailApp.sendEmail(
         row[1],
         `【${label}】アルバイト明細`,
-        `本社 経理部 御中\n\nおつかれさまです。\n\n${label}のアルバイト明細をお送りします。\n\nご確認をよろしくお願いいたします。`,
+        `おつかれさまです。\n\n${label}のアルバイト明細をお送りします。\n\nご確認をよろしくお願いいたします。`,
         { attachments: [xlsxBlob] }
       )
       Logger.log(`Excel送信: ${row[1]}`)
+      sentCount++
     })
+  if (sentCount === 0) {
+    Logger.log('警告: Excel送信先が0件。管理者シートの「本社」フラグを確認してください。')
+    sendAdminMail(`【月次バックアップ警告】${label} Excel送信先0件`, '管理者シートに「本社」フラグの行が見つかりませんでした。確認をお願いします。')
+  }
 }
 
 // ============================================================
@@ -1782,6 +1814,196 @@ function monthlyUpdate() {
 }
 
 // ============================================================
+//  5月分バックアップ緊急リカバリー
+//  打刻ログ・勤務記録ログから 4/21-5/20 を再構築してバックアップ再作成・再送信
+// ============================================================
+
+function recoverMayBackup() {
+  const ss  = SpreadsheetApp.getActiveSpreadsheet()
+  const ui  = SpreadsheetApp.getUi()
+
+  const confirm = ui.alert(
+    '⚠️ 5月分バックアップ再作成',
+    '4/21-5/20の正しいデータでバックアップを再作成し、本社へ送信します。\n（現在の「アルバイト明細_2026年5月分」は削除されます）\n\nよろしいですか？',
+    ui.ButtonSet.OK_CANCEL
+  )
+  if (confirm !== ui.Button.OK) return
+
+  try {
+    const START       = '2026-04-21'
+    const END         = '2026-05-20'
+    const periodStart = new Date(2026, 3, 21)
+    const periodEnd   = new Date(2026, 4, 20)
+    const dayCount    = 30
+
+    const rateSheet    = getSheet(SHEET.RATE)
+    const rateData     = rateSheet.getDataRange().getValues()
+    const rateHeaders  = rateData[0]
+    const masterRows   = getSheet(SHEET.MASTER).getDataRange().getValues().slice(1)
+    const templateSheet = ss.getSheetByName('テンプレート')
+
+    // Step1: 各先生シートを 4/21-5/20 に再構築
+    masterRows.forEach(master => {
+      const name  = master[2]
+      const grade = master[3]
+      if (!name) return
+      let staffSheet = ss.getSheetByName(name)
+      if (!staffSheet) {
+        if (!templateSheet) return
+        staffSheet = templateSheet.copyTo(ss)
+        staffSheet.setName(name)
+      }
+      fillStaffSheet(staffSheet, name, grade, periodStart, dayCount, rateData, rateHeaders)
+    })
+
+    // Step2: 打刻ログ読み込み
+    const fmtTime   = t => t instanceof Date ? Utilities.formatDate(t, 'Asia/Tokyo', 'HH:mm') : String(t)
+    const clockRows = getSheet(SHEET.CLOCK).getDataRange().getValues().slice(1)
+    const clockMap  = {}
+    clockRows.forEach(row => {
+      const [, staffId,, type, dateRaw, timeRaw,,, commuteLabel, commuteAllowance, reason] = row
+      const date = dateRaw instanceof Date ? formatDate(dateRaw) : String(dateRaw)
+      if (!isInRange(date, START, END)) return
+      if (!clockMap[staffId])       clockMap[staffId] = {}
+      if (!clockMap[staffId][date]) clockMap[staffId][date] = {}
+      if (type === '出勤') {
+        clockMap[staffId][date].in               = fmtTime(timeRaw)
+        clockMap[staffId][date].commuteLabel     = commuteLabel     || ''
+        clockMap[staffId][date].commuteAllowance = commuteAllowance || 0
+      } else {
+        clockMap[staffId][date].out    = fmtTime(timeRaw)
+        clockMap[staffId][date].reason = reason || ''
+      }
+    })
+
+    // Step3: 勤務記録ログ読み込み
+    const recRows    = getSheet(SHEET.RECORD).getDataRange().getValues().slice(1)
+    const recMap     = {}
+    const vMap       = {}
+    const gradeOrder = { '小学生': 1, '中学生': 2, '高校生': 3 }
+    recRows.forEach(row => {
+      const [, staffId,, dateRaw, typeLabel, grade,, amount,,,, V] = row
+      const date = dateRaw instanceof Date ? formatDate(dateRaw) : String(dateRaw)
+      if (!isInRange(date, START, END)) return
+      if (!recMap[staffId])       recMap[staffId] = {}
+      if (!recMap[staffId][date]) recMap[staffId][date] = {}
+      if (!vMap[staffId])         vMap[staffId] = {}
+      vMap[staffId][date] = parseFloat(V) || 0
+      const normGrade = (grade || '').split('/')
+        .map(g => g.trim()).filter(g => g)
+        .reduce((max, g) => (gradeOrder[g] || 0) > (gradeOrder[max] || 0) ? g : max, '')
+      const key = `${typeLabel}_${normGrade}`
+      const col = COL_MAP[key] || COL_MAP[`${typeLabel}_`]
+      if (!col) return
+      recMap[staffId][date][col] = (recMap[staffId][date][col] || 0) + (parseFloat(amount) || 0)
+    })
+
+    // Step4: 各先生シートにデータ書き込み
+    masterRows.forEach(master => {
+      const staffId  = master[1]
+      const name     = master[2]
+      const grade    = master[3]
+      const isSocial = grade === '社員'
+      const staffSheet = ss.getSheetByName(name)
+      if (!staffSheet) return
+      const sheetRows = staffSheet.getDataRange().getValues()
+      for (let i = 1; i < sheetRows.length; i++) {
+        const dateVal = sheetRows[i][1]
+        if (!dateVal) continue
+        const date = formatDate(dateVal instanceof Date ? dateVal : new Date(dateVal))
+        if (!isInRange(date, START, END)) continue
+        const clock  = clockMap[staffId]?.[date] || {}
+        const recDay = recMap[staffId]?.[date]   || {}
+        const inTime  = clock.in  || ''
+        const outTime = clock.out || ''
+        if (!isSocial && Object.keys(recDay).length > 0) {
+          Object.entries(recDay).forEach(([col, val]) => {
+            staffSheet.getRange(i + 1, parseInt(col)).setValue(val || '')
+          })
+        }
+        if (inTime)  staffSheet.getRange(i + 1, 23).setValue(inTime)
+        if (outTime) staffSheet.getRange(i + 1, 24).setValue(outTime)
+        if (clock.commuteAllowance) staffSheet.getRange(i + 1, COL_AA).setValue(clock.commuteAllowance)
+        if (clock.reason) staffSheet.getRange(i + 1, 28).setValue(clock.reason)
+      }
+    })
+    SpreadsheetApp.flush()
+
+    // Step5: 旧バックアップ削除
+    const folder = getBackupSubFolder(ss, 'monthly')
+    const iter = folder.getFilesByName('アルバイト明細_2026年5月分')
+    while (iter.hasNext()) { iter.next().setTrashed(true) }
+
+    // Step6: 正しいバックアップ作成・本社へ送信
+    monthlyBackup(ss, periodEnd)
+
+    // Step7: 現在期間（5/21-6/20）に戻す
+    autoMonthlyUpdate(ss, new Date())
+
+    ui.alert('完了！\n4/21-5/20の正しいデータでバックアップを再作成し、本社へ送信しました。')
+  } catch (e) {
+    ui.alert(`エラー: ${e.message}`)
+    Logger.log(`recoverMayBackup エラー: ${e}`)
+  }
+}
+
+// ============================================================
+//  本社へ明細メール送信（手動実行用）
+//  対象月を選んで monthlyBackup を呼び出す
+// ============================================================
+
+function sendMonthlyMailManual() {
+  const ui  = SpreadsheetApp.getUi()
+  const now = new Date()
+
+  // デフォルトは「前月20日〆」（今日が21日以降なら今月20日〆、そうでなければ前月20日〆）
+  let defaultYear, defaultMonth
+  if (now.getDate() >= 21) {
+    defaultYear  = now.getFullYear()
+    defaultMonth = now.getMonth() + 1  // 今月
+  } else {
+    const prev   = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    defaultYear  = prev.getFullYear()
+    defaultMonth = prev.getMonth() + 1  // 先月
+  }
+
+  const res = ui.prompt(
+    '📧 本社へ明細メール送信',
+    `送信する月を入力してください（例: ${defaultYear}/${defaultMonth}）\n※ その月の21日〜翌月20日分が対象です`,
+    ui.ButtonSet.OK_CANCEL
+  )
+  if (res.getSelectedButton() !== ui.Button.OK) return
+
+  const input = res.getResponseText().trim()
+  const match = input.match(/^(\d{4})[\/\-年](\d{1,2})$/)
+  if (!match) {
+    ui.alert('入力形式が正しくありません。例: 2026/5')
+    return
+  }
+
+  const year  = parseInt(match[1])
+  const month = parseInt(match[2])
+  // その月の20日が〆日
+  const endDate = new Date(year, month - 1, 20)
+
+  const confirm = ui.alert(
+    '確認',
+    `${year}年${month}月分（〜${month}/20）のアルバイト明細を\n本社へメール送信します。よろしいですか？`,
+    ui.ButtonSet.OK_CANCEL
+  )
+  if (confirm !== ui.Button.OK) return
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet()
+    monthlyBackup(ss, endDate)
+    ui.alert(`送信完了！\n${year}年${month}月分を本社へ送信しました。`)
+  } catch (e) {
+    ui.alert(`送信失敗: ${e.message}\n\nGASのログを確認してください。`)
+    Logger.log(`sendMonthlyMailManual エラー: ${e}`)
+  }
+}
+
+// ============================================================
 //  講師シート保護（B2:AB36 を手動編集禁止）
 // ============================================================
 
@@ -1803,13 +2025,16 @@ function protectStaffSheet(sheet) {
 
 function fillStaffSheet(sheet, staffName, grade, periodStart, dayCount, rateData, rateHeaders) {
 
-  // ── データ行をクリア（C〜R授業コマ数・W-X入退室・AA交通費）──
+  // ── データ行をクリア（C〜R授業コマ数・W-X入退室・AA交通費・AB備考）──
   // ※ T・U・V・Y・Z はテンプレートの数式のため clearContent しない
   sheet.getRange(DATA_START_ROW, 3,  DATA_MAX_ROWS, 16).clearContent() // C-R（授業コマ数）
   sheet.getRange(DATA_START_ROW, 23, DATA_MAX_ROWS, 2).clearContent()  // W-X（入退室）
-  sheet.getRange(DATA_START_ROW, COL_AA, DATA_MAX_ROWS, 1).clearContent() // AA
+  sheet.getRange(DATA_START_ROW, COL_AA, DATA_MAX_ROWS, 1).clearContent() // AA（交通費）
+  sheet.getRange(DATA_START_ROW, 28,  DATA_MAX_ROWS, 1).clearContent()  // AB（備考）
   // コマ単価行（35行目）をクリア
   sheet.getRange(RATE_ROW, 3, 1, 16).clearContent()  // C35:R35
+  // AB列以降の余分なフォーマット（色など）をクリア
+  sheet.getRange(DATA_START_ROW, 29, DATA_MAX_ROWS, 10).clearFormat()
 
   // ── スタッフ情報（A2, A4）──
   sheet.getRange('A2').setValue(staffName)

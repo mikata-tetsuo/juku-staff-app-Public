@@ -1,0 +1,17 @@
+{
+  "name": "中谷塾 講師アプリ",
+  "short_name": "中谷塾",
+  "description": "中谷塾 講師勤務管理アプリ",
+  "start_url": "https://liff.line.me/2009964329-UsimhYJ2",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#06C755",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
