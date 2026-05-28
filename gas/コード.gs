@@ -2469,3 +2469,103 @@ function createTestDataSanpo() {
 
   Logger.log('=== 三方哲郎テストデータ作成完了 ===')
 }
+
+// ============================================================
+//  【一回限り】全講師シートのT列（MMコマ合計）数式を一括修正
+//  テンプレートのT列数式が抜けていた場合に実行する
+// ============================================================
+
+function fixTColumnAllSheets() {
+  const ss      = SpreadsheetApp.getActiveSpreadsheet()
+  const masters = getSheet(SHEET.MASTER).getDataRange().getValues().slice(1)
+
+  masters.forEach(master => {
+    const name = master[2]
+    if (!name) return
+    const sheet = ss.getSheetByName(name)
+    if (!sheet) return
+
+    const lastRow = sheet.getLastRow()
+    const bValues = sheet.getRange(2, 2, lastRow - 1, 1).getValues()
+
+    for (let i = 0; i < bValues.length; i++) {
+      if (!bValues[i][0]) continue
+      const row = i + 2
+      sheet.getRange(row, 20).setFormula(`=SUM(C${row}:H${row})`)
+    }
+    Logger.log(`${name}: T列数式追加完了`)
+  })
+
+  SpreadsheetApp.flush()
+  Logger.log('全シートT列数式修正完了')
+}
+
+function fixZColumnAllSheets() {
+  const ss      = SpreadsheetApp.getActiveSpreadsheet()
+  const masters = getSheet(SHEET.MASTER).getDataRange().getValues().slice(1)
+
+  masters.forEach(master => {
+    const name = master[2]
+    if (!name) return
+    const sheet = ss.getSheetByName(name)
+    if (!sheet) return
+
+    const lastRow = sheet.getLastRow()
+    const bValues = sheet.getRange(2, 2, lastRow - 1, 1).getValues()
+
+    for (let i = 0; i < bValues.length; i++) {
+      if (!bValues[i][0]) continue
+      const row = i + 2
+      const cell = sheet.getRange(row, 26)
+      cell.setFormula(`=IFERROR(IF(AND(W${row}="",X${row}=""),"",(Y${row}-V${row})*24),"")`)
+      cell.setNumberFormat('#,##0.0')
+    }
+    Logger.log(`${name}: Z列数式修正完了`)
+  })
+
+  SpreadsheetApp.flush()
+  Logger.log('全シートZ列数式修正完了')
+}
+
+function fixZColumnConditionalFormat() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet()
+  const masters = getSheet(SHEET.MASTER).getDataRange().getValues().slice(1)
+  const sheetNames = masters.map(m => m[2]).filter(Boolean)
+  sheetNames.push('テンプレート')
+
+  sheetNames.forEach(name => {
+    const sheet = ss.getSheetByName(name)
+    if (!sheet) return
+
+    const range = sheet.getRange(2, 26, 31, 1)
+
+    const existingRules = sheet.getConditionalFormatRules()
+    const newRules = existingRules.filter(rule => {
+      const ranges = rule.getRanges()
+      return !ranges.some(r => r.getColumn() === 26 && r.getLastColumn() === 26)
+    })
+
+    newRules.push(
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenFormulaSatisfied(`=AND(ISNUMBER($Z2),$Z2<0)`)
+        .setBackground('#EA9999')
+        .setRanges([range])
+        .build(),
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenFormulaSatisfied(`=AND(ISNUMBER($Z2),$Z2>=1)`)
+        .setBackground('#FFE599')
+        .setRanges([range])
+        .build(),
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenFormulaSatisfied(`=AND(ISNUMBER($Z2),$Z2>=0,$Z2<1)`)
+        .setBackground('#B6D7A8')
+        .setRanges([range])
+        .build()
+    )
+
+    sheet.setConditionalFormatRules(newRules)
+    Logger.log(`${name}: Z列条件付き書式更新完了`)
+  })
+
+  Logger.log('全シートZ列条件付き書式修正完了')
+}

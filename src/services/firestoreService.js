@@ -1,5 +1,5 @@
 import { db } from '../lib/firebase'
-import { collection, addDoc, query, where, getDocs, serverTimestamp } from 'firebase/firestore'
+import { collection, addDoc, doc, setDoc, query, where, getDocs, serverTimestamp } from 'firebase/firestore'
 
 const BRANCH = import.meta.env.VITE_BRANCH_NAME || '不明'
 
@@ -20,7 +20,7 @@ export async function writeAttendance({ staffId, name, type, timestamp, location
 
 export async function writeReport({ staffId, name, date, lessons, clockInTime, clockOutTime, V }) {
   const BRANCH = import.meta.env.VITE_BRANCH_NAME || '不明'
-  await addDoc(collection(db, 'reports'), {
+  await setDoc(doc(db, 'reports', `${staffId}_${date}`), {
     staffId,
     name,
     date,
@@ -29,7 +29,7 @@ export async function writeReport({ staffId, name, date, lessons, clockInTime, c
     clockOutTime: clockOutTime || '',
     V: V || 0,
     branch: BRANCH,
-    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
   })
 }
 

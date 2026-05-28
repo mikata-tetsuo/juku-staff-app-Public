@@ -162,6 +162,7 @@ export default function ClockScreen({ staff, lineProfile, items = [], onNoticeCl
       setClockInTime(session.clockInTime)
       setElapsed(calcElapsed(session.clockInTime))
       if (session.minExitDate) setMinExitDate(new Date(session.minExitDate))
+      if (session.lessons) setSubmittedLessons(session.lessons)
       return
     }
 
@@ -274,6 +275,7 @@ export default function ClockScreen({ staff, lineProfile, items = [], onNoticeCl
     saveSession({
       status: STATUS.REPORTED, clockInTime, date: clock.isoDate,
       minExitDate: newMinExitDate ? newMinExitDate.toISOString() : null,
+      lessons: lessonsRaw || null,
     })
   }
 
