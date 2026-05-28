@@ -18,16 +18,22 @@ export async function sbWriteAttendance({ staffId, name, type, timestamp, locati
 }
 
 export async function sbWriteReport({ staffId, name, date, lessons, clockInTime, clockOutTime, V }) {
-  const { error } = await supabase.from('juku_reports').insert({
+  if (!lessons?.length) return
+  const rows = lessons.map(l => ({
     staff_id: staffId,
     name,
     date,
-    lessons,
-    clock_in_time: clockInTime || '',
+    type_label:     l.typeLabel || '',
+    grade:          l.grade     || '',
+    target:         l.target    || '',
+    amount:         l.amount    || 0,
+    unit:           l.unit      || '',
+    clock_in_time:  clockInTime  || '',
     clock_out_time: clockOutTime || '',
-    v: V || 0,
-    branch: BRANCH,
-  })
+    v:              V || 0,
+    branch:         BRANCH,
+  }))
+  const { error } = await supabase.from('juku_reports').insert(rows)
   if (error) throw error
 }
 
