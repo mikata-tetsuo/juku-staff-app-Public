@@ -247,7 +247,7 @@ export default function ReportForm({ staff, date, clockInTime, initialLessons, o
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 pb-32">
         {isEditing && (
           <div className="rounded-xl px-4 py-3 bg-amber-50 border border-amber-300 text-amber-700 text-sm">
-            ✏️ 前回の入力内容が表示されています。追加・修正して再送信してください。
+            ✏️ 前回の入力内容が表示されています。追加・修正して再送信してください。送信するとデータは上書きされます。
           </div>
         )}
 
