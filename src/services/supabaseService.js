@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 const BRANCH = import.meta.env.VITE_BRANCH_NAME || '不明'
 
 export async function sbWriteAttendance({ staffId, name, type, timestamp, location, commuteLabel = '', commuteAllowance = 0, reason = '' }) {
-  const { error } = await supabase.schema('juku').from('attendance').insert({
+  const { error } = await supabase.from('juku_attendance').insert({
     staff_id: staffId,
     name,
     type,
@@ -18,7 +18,7 @@ export async function sbWriteAttendance({ staffId, name, type, timestamp, locati
 }
 
 export async function sbWriteReport({ staffId, name, date, lessons, clockInTime, clockOutTime, V }) {
-  const { error } = await supabase.schema('juku').from('reports').insert({
+  const { error } = await supabase.from('juku_reports').insert({
     staff_id: staffId,
     name,
     date,
@@ -32,7 +32,7 @@ export async function sbWriteReport({ staffId, name, date, lessons, clockInTime,
 }
 
 export async function sbWriteSession(staffId, date, minExitDate) {
-  const { error } = await supabase.schema('juku').from('sessions').insert({
+  const { error } = await supabase.from('juku_sessions').insert({
     staff_id: staffId,
     date,
     min_exit_date: minExitDate ? minExitDate.toISOString() : null,
