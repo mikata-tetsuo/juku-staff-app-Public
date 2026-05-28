@@ -153,6 +153,7 @@ function buildLessonPayload(lessons) {
 }
 
 export default function ReportForm({ staff, date, clockInTime, initialLessons, onComplete }) {
+  const isEditing = !!(initialLessons?.length)
   const [lessons, setLessons] = useState(() => initialLessons?.length ? initialLessons : [emptyLesson()])
   const [submitted, setSubmitted] = useState(false)
   const [minExitDate, setMinExitDate] = useState(null)
@@ -239,11 +240,17 @@ export default function ReportForm({ staff, date, clockInTime, initialLessons, o
   return (
     <form onSubmit={handleSubmit} className="flex flex-col h-full">
       <div className="bg-line-green text-white px-4 py-4">
-        <h2 className="text-lg font-bold">勤務記録</h2>
+        <h2 className="text-lg font-bold">{isEditing ? '勤務記録を修正' : '勤務記録'}</h2>
         <p className="text-sm opacity-90">{date}　{staff.name}　{clockInTime && `${clockInTime} 入室`}</p>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 pb-32">
+        {isEditing && (
+          <div className="rounded-xl px-4 py-3 bg-amber-50 border border-amber-300 text-amber-700 text-sm">
+            ✏️ 前回の入力内容が表示されています。追加・修正して再送信してください。
+          </div>
+        )}
+
         {lessons.map((lesson, idx) => (
           <LessonCard key={idx} idx={idx} lesson={lesson}
             onChange={updateLesson} onRemove={removeLesson} />
