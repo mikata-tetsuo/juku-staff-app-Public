@@ -1,4 +1,5 @@
 import { writeAttendance, writeReport, writeSession } from './firestoreService'
+import { sbWriteAttendance, sbWriteReport, sbWriteSession } from './supabaseService'
 
 const GAS_URL  = import.meta.env.VITE_GAS_URL
 const DEV_MODE = import.meta.env.VITE_DEV_MODE === 'true'
@@ -34,6 +35,9 @@ export async function postAttendance({ staffId, name, type, timestamp, location,
   writeAttendance({ staffId, name, type, timestamp, location, commuteLabel, commuteAllowance, reason }).catch(err =>
     console.error('[Firestore] 打刻書き込み失敗:', err)
   )
+  sbWriteAttendance({ staffId, name, type, timestamp, location, commuteLabel, commuteAllowance, reason }).catch(err =>
+    console.error('[Supabase] 打刻書き込み失敗:', err)
+  )
   return { success: true }
 }
 
@@ -55,6 +59,12 @@ export async function postReport({ staffId, name, date, lessons, clockInTime, cl
   await writeReport({ staffId, name, date, lessons, clockInTime, clockOutTime, V })
   writeSession(staffId, date, minExitDate).catch(err =>
     console.error('[Firestore] session書き込み失敗:', err)
+  )
+  sbWriteReport({ staffId, name, date, lessons, clockInTime, clockOutTime, V }).catch(err =>
+    console.error('[Supabase] 勤務記録書き込み失敗:', err)
+  )
+  sbWriteSession(staffId, date, minExitDate).catch(err =>
+    console.error('[Supabase] session書き込み失敗:', err)
   )
 
   return { success: true }
