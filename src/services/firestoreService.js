@@ -64,6 +64,12 @@ export async function fetchTodayAttendance(staffId) {
   }
 }
 
+export async function upsertStaff(staffId, name, lineUserId) {
+  await setDoc(doc(db, 'staffs', staffId), {
+    staffId, name, lineUserId, updatedAt: serverTimestamp()
+  }, { merge: true })
+}
+
 export async function fetchMyErrors(staffId) {
   const snap = await getDocs(
     query(collection(db, 'errors'), where('staffId', '==', staffId), where('resolved', '==', false))

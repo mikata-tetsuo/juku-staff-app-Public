@@ -1,5 +1,6 @@
 const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore')
 const { initializeApp } = require('firebase-admin/app')
+const { getFirestore } = require('firebase-admin/firestore')
 const { google } = require('googleapis')
 
 initializeApp()
@@ -115,6 +116,38 @@ exports.syncReportToSheets = onDocumentWritten(
       resource: { values: rows },
     })
     console.log(`[syncReportToSheets] ${isUpdate ? '修正' : '新規'}: ${name} ${date} ${rows.length}行`)
+  }
+)
+
+// ── Zエラー → LINE 通知 ──────────────────────────────────────────────────────
+exports.syncErrorToLine = onDocumentCreated(
+  { document: 'errors/{id}', region: 'asia-northeast2' },
+  async (event) => {
+    const { staffId, name, date, detail } = event.data.data()
+    const LINE_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN
+    if (!LINE_TOKEN) { console.error('LINE_CHANNEL_ACCESS_TOKEN 未設定'); return }
+
+    const db = getFirestore()
+    const staffDoc = await db.collection('staffs').doc(staffId).get()
+    if (!staffDoc.exists) { console.warn(`staffs/${staffId} が見つかりません`); return }
+
+    const { lineUserId } = staffDoc.data()
+    if (!lineUserId) { console.warn(`lineUserId 未設定: ${staffId}`); return }
+
+    const text = `【勤務記録エラー】\n${date} の勤務記録に確認が必要です。\n\n${detail}\n\nアプリを開いて修正してください。\nhttps://liff.line.me/${process.env.LIFF_ID || ''}`
+
+    const res = await fetch('https://api.line.me/v2/bot/messages/push', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${LINE_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        to: lineUserId,
+        messages: [{ type: 'text', text }],
+      }),
+    })
+    console.log(`[syncErrorToLine] ${name} ${date} status=${res.status}`)
   }
 )
 
