@@ -4,6 +4,7 @@ import { fetchTodayAttendance, fetchMyErrors, fetchAllErrors, resolveError } fro
 import { getLocation, isAwayFromJuku } from '../utils/gps'
 import { closeLiff } from '../services/liffService'
 import ReportForm from './ReportForm'
+import StaffFixScreen from './StaffFixScreen'
 import NeedGpsDialog from './NeedGpsDialog'
 import FarWarningDialog from './FarWarningDialog'
 import ZReasonDialog from './ZReasonDialog'
@@ -415,13 +416,24 @@ export default function ClockScreen({ staff, lineProfile, items = [], onNoticeCl
 
   // ─── 勤務記録フォーム ───────────────────────────────────────────────────────
 
+  if (showReport && fixingError) {
+    return (
+      <StaffFixScreen
+        staff={staff}
+        error={fixingError}
+        onComplete={handleReportDone}
+        onCancel={() => { setShowReport(false); setFixingError(null) }}
+      />
+    )
+  }
+
   if (showReport) {
     return (
       <ReportForm
         staff={staff}
-        date={fixingError ? fixingError.date : clock.isoDate}
-        clockInTime={fixingError ? null : clockInTime}
-        initialLessons={fixingError ? null : submittedLessons}
+        date={clock.isoDate}
+        clockInTime={clockInTime}
+        initialLessons={submittedLessons}
         onComplete={handleReportDone}
       />
     )
