@@ -419,9 +419,9 @@ export default function ClockScreen({ staff, lineProfile, items = [], onNoticeCl
     return (
       <ReportForm
         staff={staff}
-        date={clock.isoDate}
-        clockInTime={clockInTime}
-        initialLessons={submittedLessons}
+        date={fixingError ? fixingError.date : clock.isoDate}
+        clockInTime={fixingError ? null : clockInTime}
+        initialLessons={fixingError ? null : submittedLessons}
         onComplete={handleReportDone}
       />
     )
