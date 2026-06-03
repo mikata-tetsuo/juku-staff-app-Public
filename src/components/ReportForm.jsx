@@ -152,7 +152,28 @@ function buildLessonPayload(lessons) {
   })
 }
 
-export default function ReportForm({ staff, date, clockInTime, initialLessons, onComplete }) {
+function makeDateTime(date, time) {
+  const [h, m] = (time || '00:00').split(':').map(Number)
+  const base = date ? new Date(`${date}T00:00:00`) : new Date()
+  return new Date(base.getFullYear(), base.getMonth(), base.getDate(), h || 0, m || 0)
+}
+
+export default function ReportForm({
+  staff,
+  date,
+  clockInTime,
+  clockOutTimeOverride = '',
+  initialLessons,
+  onComplete,
+  onCancel,
+  skipTimeValidation = false,
+  title,
+  submitLabel,
+  doneMessage,
+  submitReport,
+  overageToleranceHours = 0.25,
+  adminMode = false,
+}) {
   const isEditing = !!(initialLessons?.length)
   const [lessons, setLessons] = useState(() => initialLessons?.length ? initialLessons : [emptyLesson()])
   const [submitted, setSubmitted] = useState(false)
@@ -188,31 +209,29 @@ export default function ReportForm({ staff, date, clockInTime, initialLessons, o
     }
 
     // 滞在時間 vs 報告時間チェック
-    const now = new Date()
-    let clockInDate = now
-    if (clockInTime) {
-      const [h, m] = clockInTime.split(':').map(Number)
-      clockInDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m)
-    }
+    const now = clockOutTimeOverride ? makeDateTime(date, clockOutTimeOverride) : new Date()
+    const clockInDate = clockInTime ? makeDateTime(date, clockInTime) : now
     const Y = (now - clockInDate) / 3600000
     const Z = Y - V
 
-    if (Z < -0.25) {
+    if (!skipTimeValidation && Z < -overageToleranceHours) {
       setError(`報告時間（${Math.round(V * 60)}分）が滞在時間（${Math.round(Y * 60)}分）を超えています。報告内容を修正するか、もう少し時間が経過してから入力してください。`)
       return
     }
 
     const nextMinExitDate = new Date(clockInDate.getTime() + V * 3600000)
     const minExitStr = nextMinExitDate.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
-    if (Z <= 0) {
+    if (!skipTimeValidation && Z <= 0) {
       setWarning(`⚠️ 授業時間ぴったりです。${minExitStr} 以降に退室できます。`)
     }
     setMinExitDate(nextMinExitDate)
 
     setSubmitted(true)
     try {
-      const clockOutTime = now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
-      await postReport({ staffId: staff.staffId, name: staff.name, date, lessons: buildLessonPayload(lessons), clockInTime, clockOutTime, V })
+      const clockOutTime = clockOutTimeOverride || now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+      const payload = { staffId: staff.staffId, name: staff.name, date, lessons: buildLessonPayload(lessons), clockInTime, clockOutTime, V }
+      if (submitReport) await submitReport(payload, lessons)
+      else await postReport(payload)
     } catch {
       setSubmitted(false)
       setMinExitDate(null)
@@ -225,13 +244,13 @@ export default function ReportForm({ staff, date, clockInTime, initialLessons, o
     return (
       <div className="flex flex-col items-center justify-center h-full gap-6 px-6">
         <div className="text-5xl">✅</div>
-        <p className="text-xl font-bold text-gray-800">勤務記録を送信しました</p>
-        {minExitStr && (
+        <p className="text-xl font-bold text-gray-800">{doneMessage || '勤務記録を送信しました'}</p>
+        {!adminMode && !skipTimeValidation && minExitStr && (
           <p className="text-amber-600 font-semibold text-sm text-center">🕐 {minExitStr} 以降に退室できます</p>
         )}
-        <p className="text-gray-500 text-sm text-center">次は退室打刻をしてください。</p>
+        <p className="text-gray-500 text-sm text-center">{adminMode ? '管理者モードでの保存が完了しました。' : skipTimeValidation ? '管理者入力が完了しました。' : '次は退室打刻をしてください。'}</p>
         <button onClick={() => onComplete(minExitDate, lessons)} className="w-full py-3 bg-line-green text-white font-bold rounded-xl">
-          退室画面へ戻る
+          {adminMode || skipTimeValidation ? '管理者モードへ戻る' : '退室画面へ戻る'}
         </button>
       </div>
     )
@@ -240,7 +259,14 @@ export default function ReportForm({ staff, date, clockInTime, initialLessons, o
   return (
     <form onSubmit={handleSubmit} className="flex flex-col h-full">
       <div className="bg-line-green text-white px-4 py-4">
-        <h2 className="text-lg font-bold">{isEditing ? '勤務記録を修正' : '勤務記録'}</h2>
+        <div className="flex items-center gap-2">
+          {onCancel && (
+            <button type="button" onClick={onCancel} className="text-sm bg-white/20 px-3 py-1 rounded-lg">
+              戻る
+            </button>
+          )}
+          <h2 className="text-lg font-bold">{title || (isEditing ? '勤務記録を修正' : '勤務記録')}</h2>
+        </div>
         <p className="text-sm opacity-90">{date}　{staff.name}　{clockInTime && `${clockInTime} 入室`}</p>
       </div>
 
@@ -276,7 +302,7 @@ export default function ReportForm({ staff, date, clockInTime, initialLessons, o
       <div className="px-4 py-4 border-t border-gray-100 bg-white">
         <button type="submit"
           className="w-full py-4 bg-line-green text-white font-bold rounded-xl text-lg">
-          勤務記録を送信する
+          {submitLabel || '勤務記録を送信する'}
         </button>
       </div>
     </form>

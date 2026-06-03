@@ -10,13 +10,47 @@ export async function fetchStaffByLineId(lineUserId) {
   if (DEV_MODE) {
     await delay(400)
     const mock = {
-      'U_dev_mock_001': { staffId: 'S001', name: '田中 花子', grade: 'B3', email: 'hanako@example.com', subjects: ['数学', '英語', '物理'], commutes: [{ label: '自転車', allowance: 0 }, { label: '電車', allowance: 200 }] },
+      'U_dev_mock_001': { staffId: 'S001', name: '田中 花子', grade: 'B3', email: 'hanako@example.com', subjects: ['数学', '英語', '物理'], commutes: [{ label: '自転車', allowance: 0 }, { label: '電車', allowance: 200 }], isAdmin: true },
     }
     return mock[lineUserId] || null
   }
 
   const res = await gasGet({ action: 'getStaff', lineUserId })
   return res
+}
+
+export async function fetchStaffList(adminLineUserId = '') {
+  if (DEV_MODE) {
+    await delay(300)
+    return {
+      staff: [
+        { staffId: 'S001', name: '田中 花子', grade: 'B3', commutes: [{ label: '自転車', allowance: 0 }, { label: '電車', allowance: 200 }] },
+        { staffId: 'S002', name: '佐藤 太郎', grade: 'B2', commutes: [{ label: '徒歩', allowance: 0 }] },
+        { staffId: 'S003', name: '山本 美咲', grade: 'A1', commutes: [{ label: '電車', allowance: 240 }] },
+      ],
+    }
+  }
+  const data = await gasGet({ action: 'getStaffList', adminLineUserId })
+  return data || { staff: [] }
+}
+
+export async function fetchAdminWorkEntry({ adminLineUserId, staffId, date }) {
+  if (DEV_MODE) {
+    await delay(300)
+    return { clockInTime: '', clockOutTime: '', commuteLabel: '', commuteAllowance: 0, lessons: [] }
+  }
+  const data = await gasGet({ action: 'getAdminWorkEntry', adminLineUserId, staffId, date })
+  return data || { lessons: [] }
+}
+
+export async function saveAdminWorkEntry({ adminLineUserId, adminName, staffId, name, date, clockInTime, clockOutTime, commuteLabel = '', commuteAllowance = 0, lessons, V }) {
+  if (DEV_MODE) {
+    await delay(500)
+    console.log('[mock] 管理者代理入力:', { adminLineUserId, adminName, staffId, name, date, clockInTime, clockOutTime, commuteLabel, commuteAllowance, lessons, V })
+    return { success: true }
+  }
+  await gasPost({ action: 'saveAdminWorkEntry', adminLineUserId, adminName, staffId, name, date, clockInTime, clockOutTime, commuteLabel, commuteAllowance, lessons, V })
+  return { success: true }
 }
 
 // ─── 打刻 ────────────────────────────────────────────────────────────────────
@@ -50,7 +84,7 @@ export async function postReport({ staffId, name, date, lessons, clockInTime, cl
     return { success: true }
   }
 
-  const today = new Date()
+  const today = date ? new Date(`${date}T00:00:00`) : new Date()
   const [h, m] = (clockInTime || '0:0').split(':').map(Number)
   const clockInDate = new Date(today.getFullYear(), today.getMonth(), today.getDate(), h, m)
   const minExitDate = new Date(clockInDate.getTime() + V * 3600000)
