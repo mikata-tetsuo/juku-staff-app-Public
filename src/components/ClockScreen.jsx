@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { postAttendance } from '../services/mockApi'
-import { fetchTodayAttendance } from '../services/firestoreService'
+import { fetchTodayAttendance, fetchMyErrors, fetchAllErrors, resolveError } from '../services/firestoreService'
 import { getLocation, isAwayFromJuku } from '../utils/gps'
 import { closeLiff } from '../services/liffService'
 import ReportForm from './ReportForm'
@@ -8,6 +8,7 @@ import NeedGpsDialog from './NeedGpsDialog'
 import FarWarningDialog from './FarWarningDialog'
 import ZReasonDialog from './ZReasonDialog'
 import RetroClockInDialog from './RetroClockInDialog'
+import AdminWorkEntryScreen from './AdminWorkEntryScreen'
 
 // ─── 時刻ユーティリティ ──────────────────────────────────────────────────────
 
@@ -111,6 +112,40 @@ function UrgentCard({ items, onNoticeClick }) {
   )
 }
 
+// ─── Zエラーバナー ───────────────────────────────────────────────────────────
+
+function ErrorBanner({ errors, isAdmin, onResolve, onFix }) {
+  if (errors.length === 0) return null
+  return (
+    <div className="bg-red-50 border-2 border-red-400 rounded-2xl shadow-sm p-3 space-y-2">
+      <p className="text-sm font-bold text-red-700">🚨 勤務記録に確認が必要なエラーがあります（{errors.length}件）</p>
+      {errors.map(err => (
+        <div key={err.id} className="bg-white border border-red-200 rounded-xl p-3 flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-gray-800">
+              {err.date} {isAdmin && <span className="text-red-600">　{err.name} 先生</span>}
+            </p>
+            <p className="text-xs text-gray-600 mt-0.5">{err.detail}</p>
+          </div>
+          {isAdmin ? (
+            <button
+              onClick={() => onResolve(err.id)}
+              className="text-xs bg-red-500 text-white px-3 py-1.5 rounded-lg font-semibold flex-shrink-0 active:bg-red-600">
+              ✓ 解決
+            </button>
+          ) : (
+            <button
+              onClick={() => onFix(err)}
+              className="text-xs bg-red-500 text-white px-3 py-1.5 rounded-lg font-semibold flex-shrink-0 active:bg-red-600">
+              修正する
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ─── メインコンポーネント ────────────────────────────────────────────────────
 
 export default function ClockScreen({ staff, lineProfile, items = [], onNoticeClick }) {
@@ -126,12 +161,16 @@ export default function ClockScreen({ staff, lineProfile, items = [], onNoticeCl
   const [minExitDate, setMinExitDate] = useState(null)
   const [clockOutError, setClockOutError] = useState('')
   const [showRetroDialog, setShowRetroDialog] = useState(false)
+  const [showAdminMode, setShowAdminMode] = useState(false)
   const [submittedLessons, setSubmittedLessons] = useState(null)
   const [showClockInOverlay, setShowClockInOverlay] = useState(false)
   const [doneCountdown, setDoneCountdown] = useState(15)
   const doneTimerRef = useRef(null)
+  const [errors, setErrors] = useState([])
+  const [fixingError, setFixingError] = useState(null)
 
   const isShain = staff.grade === '社員'
+  const isAdmin = !!staff.isAdmin
 
   // 時計 & 経過時間の更新
   useEffect(() => {
@@ -183,6 +222,22 @@ export default function ClockScreen({ staff, lineProfile, items = [], onNoticeCl
       }
     }).catch(err => console.warn('[Firestore] セッション復元失敗:', err))
   }, [])
+
+  // Zエラー取得
+  useEffect(() => {
+    const fetch = isAdmin ? fetchAllErrors() : fetchMyErrors(staff.staffId)
+    fetch.then(setErrors).catch(err => console.warn('[Firestore] エラー取得失敗:', err))
+  }, [])
+
+  async function handleResolveError(errorId) {
+    await resolveError(errorId).catch(console.error)
+    setErrors(prev => prev.filter(e => e.id !== errorId))
+  }
+
+  function handleFixError(err) {
+    setFixingError(err)
+    setShowReport(true)
+  }
 
   function resetToIdle() {
     clearInterval(doneTimerRef.current)
@@ -272,6 +327,11 @@ export default function ClockScreen({ staff, lineProfile, items = [], onNoticeCl
     setStatus(STATUS.REPORTED)
     setMinExitDate(newMinExitDate || null)
     setSubmittedLessons(lessonsRaw || null)
+    if (fixingError) {
+      resolveError(fixingError.id).catch(console.error)
+      setErrors(prev => prev.filter(e => e.id !== fixingError.id))
+      setFixingError(null)
+    }
     saveSession({
       status: STATUS.REPORTED, clockInTime, date: clock.isoDate,
       minExitDate: newMinExitDate ? newMinExitDate.toISOString() : null,
@@ -367,6 +427,10 @@ export default function ClockScreen({ staff, lineProfile, items = [], onNoticeCl
     )
   }
 
+  if (showAdminMode && isAdmin) {
+    return <AdminWorkEntryScreen currentStaff={staff} onClose={() => setShowAdminMode(false)} />
+  }
+
   // ─── ヘッダー ───────────────────────────────────────────────────────────────
 
   const avatarChar = staff.name?.[0] || '?'
@@ -436,7 +500,25 @@ export default function ClockScreen({ staff, lineProfile, items = [], onNoticeCl
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2 pb-6">
 
+        <ErrorBanner
+          errors={errors}
+          isAdmin={isAdmin}
+          onResolve={handleResolveError}
+          onFix={handleFixError}
+        />
+
         <UrgentCard items={items} onNoticeClick={onNoticeClick} />
+
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setShowAdminMode(true)}
+            className="w-full bg-white border border-emerald-200 rounded-xl shadow-sm px-4 py-3 flex items-center justify-between active:bg-emerald-50"
+          >
+            <span className="text-sm font-bold text-gray-800">管理者モード</span>
+            <span className="text-xs text-line-green font-semibold">代理入力へ</span>
+          </button>
+        )}
 
         {/* ── 入室前モード ─────────────────────────────────────────────────── */}
         {status === STATUS.IDLE && (

@@ -191,6 +191,8 @@ function doGet(e) {
   if (action === 'getItems')          return jsonResponse(getItems(e.parameter.staffId))
   if (action === 'getManual')         return jsonResponse(getManual())
   if (action === 'getRateTable')      return jsonResponse(getRateTable(e.parameter.staffId))
+  if (action === 'getStaffList')      return jsonResponse(getStaffList(e.parameter.adminLineUserId))
+  if (action === 'getAdminWorkEntry') return jsonResponse(getAdminWorkEntry(e.parameter))
   return jsonResponse({ error: '不明なアクション' })
 }
 
@@ -202,6 +204,7 @@ function doPost(e) {
     if (action === 'report')             return jsonResponse(saveReport(data))
     if (action === 'updateItemStatus')   return jsonResponse(updateItemStatus(data))
     if (action === 'requestRegistration') return jsonResponse(saveRegistrationRequest(data))
+    if (action === 'saveAdminWorkEntry') return jsonResponse(saveAdminWorkEntry(data))
     return jsonResponse({ error: '不明なアクション' })
   } catch (err) {
     return jsonResponse({ error: err.message })
@@ -231,11 +234,162 @@ function getStaffByLineId(lineUserId) {
         name       : rows[i][2],
         grade      : rows[i][3],
         email      : rows[i][4],
+        isAdmin    : isAdminStaff(rows[i][2], rows[i][4]),
         commutes,
       }
     }
   }
   return null
+}
+
+function getStaffList(adminLineUserId) {
+  const admin = getStaffByLineId(adminLineUserId)
+  if (!admin || !admin.isAdmin) return { error: '管理者権限がありません', staff: [] }
+
+  const rows = getSheet(SHEET.MASTER).getDataRange().getValues().slice(1)
+  const staff = rows
+    .filter(r => r[1] && r[2])
+    .map(r => {
+      const commutes = []
+      if (r[6]) commutes.push({ label: r[6], allowance: r[7] || 0 })
+      if (r[8]) commutes.push({ label: r[8], allowance: r[9] || 0 })
+      return {
+        staffId: r[1],
+        name: r[2],
+        grade: r[3],
+        email: r[4],
+        commutes,
+      }
+    })
+  return { staff }
+}
+
+function isAdminStaff(name, email) {
+  const sheet = getSheet(SHEET.ADMIN)
+  if (!sheet) return false
+  const rows = sheet.getDataRange().getValues().slice(1)
+  const targetName = normalizeAdminValue(name)
+  const targetEmail = normalizeAdminValue(email).toLowerCase()
+  return rows.some(r => {
+    const adminName = normalizeAdminValue(r[0])
+    const adminEmail = normalizeAdminValue(r[1]).toLowerCase()
+    const enabled = r[2] === true || String(r[2]).trim().toUpperCase() === 'TRUE' || String(r[2]).trim() === '有効' || String(r[2]).trim() === '本社'
+    if (!enabled) return false
+    return (targetEmail && adminEmail === targetEmail) || (targetName && adminName === targetName)
+  })
+}
+
+function normalizeAdminValue(value) {
+  return String(value || '').replace(/[\s　]+/g, '').trim()
+}
+
+function getAdminWorkEntry({ adminLineUserId, staffId, date }) {
+  const admin = getStaffByLineId(adminLineUserId)
+  if (!admin || !admin.isAdmin) return { error: '管理者権限がありません', lessons: [] }
+  if (!staffId || !date) return { lessons: [] }
+
+  const clockRows = getSheet(SHEET.CLOCK).getDataRange().getValues()
+  const fmtTime = t => t instanceof Date
+    ? Utilities.formatDate(t, 'Asia/Tokyo', 'HH:mm')
+    : String(t || '')
+
+  const entry = { clockInTime: '', clockOutTime: '', commuteLabel: '', commuteAllowance: 0, lessons: [] }
+
+  for (let i = 1; i < clockRows.length; i++) {
+    const row = clockRows[i]
+    const rowDate = row[4] instanceof Date ? formatDate(row[4]) : String(row[4] || '')
+    if (String(row[1]) !== String(staffId) || rowDate !== String(date)) continue
+    if (row[3] === '出勤') {
+      entry.clockInTime = fmtTime(row[5])
+      entry.commuteLabel = row[8] || ''
+      entry.commuteAllowance = row[9] || 0
+    }
+    if (row[3] === '退勤') {
+      entry.clockOutTime = fmtTime(row[5])
+    }
+  }
+
+  const recRows = getSheet(SHEET.RECORD).getDataRange().getValues()
+  for (let i = 1; i < recRows.length; i++) {
+    const row = recRows[i]
+    const rowDate = row[3] instanceof Date ? formatDate(row[3]) : String(row[3] || '')
+    if (String(row[1]) !== String(staffId) || rowDate !== String(date)) continue
+    entry.lessons.push({
+      typeLabel: row[4] || '',
+      grade: row[5] || '',
+      target: row[6] || '',
+      amount: row[7] || '',
+      unit: row[8] || '',
+    })
+    if (!entry.clockInTime && row[9]) entry.clockInTime = fmtTime(row[9])
+    if (!entry.clockOutTime && row[10]) entry.clockOutTime = fmtTime(row[10])
+  }
+
+  return entry
+}
+
+function saveAdminWorkEntry({ adminLineUserId, adminName, staffId, name, date, clockInTime, clockOutTime, commuteLabel, commuteAllowance, lessons, V }) {
+  const admin = getStaffByLineId(adminLineUserId)
+  if (!admin || !admin.isAdmin) return { error: '管理者権限がありません' }
+  if (!staffId || !name || !date) return { error: '必要な情報が不足しています' }
+
+  const lock = LockService.getScriptLock()
+  try {
+    lock.waitLock(15000)
+  } catch (e) {
+    throw new Error('処理が混雑しています。もう一度お試しください。')
+  }
+
+  try {
+    upsertAdminAttendanceRow(staffId, name, date, '出勤', clockInTime, commuteLabel || '', commuteAllowance || 0, `[管理者修正] ${adminName || admin.name}`)
+    upsertAdminAttendanceRow(staffId, name, date, '退勤', clockOutTime, '', 0, `[管理者修正] ${adminName || admin.name}`)
+    replaceAdminReportRows(staffId, name, date, lessons || [], clockInTime, clockOutTime, V)
+    SpreadsheetApp.flush()
+    return { success: true }
+  } finally {
+    lock.releaseLock()
+  }
+}
+
+function upsertAdminAttendanceRow(staffId, name, date, typeLabel, time, commuteLabel, commuteAllowance, reason) {
+  if (!time) return
+  const sheet = getSheet(SHEET.CLOCK)
+  const rows = sheet.getDataRange().getValues()
+  let targetRow = -1
+
+  for (let i = 1; i < rows.length; i++) {
+    const rowDate = rows[i][4] instanceof Date ? formatDate(rows[i][4]) : String(rows[i][4] || '')
+    if (String(rows[i][1]) === String(staffId) && rowDate === String(date) && rows[i][3] === typeLabel) {
+      targetRow = i + 1
+    }
+  }
+
+  const values = [[new Date(), staffId, name, typeLabel, date, time, '', '', commuteLabel || '', commuteAllowance || 0, reason || '']]
+  if (targetRow > 0) {
+    sheet.getRange(targetRow, 1, 1, 11).setValues(values)
+  } else {
+    sheet.appendRow(values[0])
+  }
+}
+
+function replaceAdminReportRows(staffId, name, date, lessons, clockInTime, clockOutTime, V) {
+  const sheet = getSheet(SHEET.RECORD)
+  const rows = sheet.getDataRange().getValues()
+  for (let i = rows.length - 1; i >= 1; i--) {
+    const rowDate = rows[i][3] instanceof Date ? formatDate(rows[i][3]) : String(rows[i][3] || '')
+    if (String(rows[i][1]) === String(staffId) && rowDate === String(date)) {
+      sheet.deleteRow(i + 1)
+    }
+  }
+
+  lessons.forEach(lesson => {
+    sheet.appendRow([
+      new Date(), staffId, name, date,
+      lesson.typeLabel || '', lesson.grade || '', lesson.target || '',
+      lesson.amount || '', lesson.unit || '',
+      clockInTime || '', clockOutTime || '', V || '',
+    ])
+  })
 }
 
 // ============================================================
@@ -1396,7 +1550,7 @@ function nightlyBatch() {
     autoMonthlyUpdate(ss, today)
   }
 
-  // ── Z異常メール通知 ──
+  // ── Z異常メール通知 + Firestore書き込み ──
   if (zErrors.length > 0) {
     const subject = `【勤務記録チェック】${formatDate(today)} 異常${zErrors.length}件`
     const body = '以下の勤務記録に差異があります。\n\n' +
@@ -1405,6 +1559,7 @@ function nightlyBatch() {
       ).join('\n') +
       '\n\n必要に応じて担当講師に確認をお願いします。'
     sendAdminMail(subject, body)
+    writeErrorsToFirestore(zErrors)
   }
 
   // ── Z異常行をログにハイライト ──
@@ -2079,6 +2234,37 @@ function fillStaffSheet(sheet, staffName, grade, periodStart, dayCount, rateData
 // ============================================================
 //  管理者メール送信
 // ============================================================
+
+function writeErrorsToFirestore(zErrors) {
+  const token     = ScriptApp.getOAuthToken()
+  const projectId = 'nakatajuku'
+  const url       = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/errors`
+
+  zErrors.forEach(e => {
+    const detail = `滞在 ${e.Y}h ／ 記録 ${e.V}h ／ 差 ${e.Z}h`
+    const payload = JSON.stringify({
+      fields: {
+        staffId:   { stringValue: e.staffId || '' },
+        name:      { stringValue: e.name },
+        date:      { stringValue: e.date },
+        errorType: { stringValue: 'Z_ERROR' },
+        detail:    { stringValue: detail },
+        resolved:  { booleanValue: false },
+        createdAt: { timestampValue: new Date().toISOString() },
+      }
+    })
+    try {
+      UrlFetchApp.fetch(url, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        payload,
+        muteHttpExceptions: true,
+      })
+    } catch(err) {
+      Logger.log(`[Firestore] エラー書き込み失敗: ${err}`)
+    }
+  })
+}
 
 function sendAdminMail(subject, body) {
   const sheet = getSheet(SHEET.ADMIN)

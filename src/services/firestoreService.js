@@ -1,5 +1,5 @@
 import { db } from '../lib/firebase'
-import { collection, addDoc, doc, setDoc, query, where, getDocs, serverTimestamp } from 'firebase/firestore'
+import { collection, addDoc, doc, setDoc, updateDoc, query, where, getDocs, serverTimestamp } from 'firebase/firestore'
 
 const BRANCH = import.meta.env.VITE_BRANCH_NAME || '不明'
 
@@ -62,6 +62,24 @@ export async function fetchTodayAttendance(staffId) {
     clockOut: todayRecords.find(r => r.type === 'out') || null,
     session,
   }
+}
+
+export async function fetchMyErrors(staffId) {
+  const snap = await getDocs(
+    query(collection(db, 'errors'), where('staffId', '==', staffId), where('resolved', '==', false))
+  )
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+}
+
+export async function fetchAllErrors() {
+  const snap = await getDocs(
+    query(collection(db, 'errors'), where('resolved', '==', false))
+  )
+  return snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.date.localeCompare(b.date))
+}
+
+export async function resolveError(errorId) {
+  await updateDoc(doc(db, 'errors', errorId), { resolved: true, resolvedAt: serverTimestamp() })
 }
 
 function toLocalDateISO(d) {
