@@ -2394,13 +2394,17 @@ function writeErrorsToFirestore(zErrors) {
   })
 }
 
-function sendAdminMail(subject, body) {
+// sendAdminMail: デフォルトは社員（C列=TRUE）のみ。本社を含める場合は includeCorporate=true
+function sendAdminMail(subject, body, includeCorporate = false) {
   const sheet = getSheet(SHEET.ADMIN)
   const rows  = sheet.getDataRange().getValues().slice(1)
   rows.forEach(row => {
     const email   = row[1]
-    const enabled = row[2]
-    if (!email || !enabled) return
+    const flag    = row[2]
+    const isShaain   = flag === true || String(flag).trim().toUpperCase() === 'TRUE'
+    const isCorporate = String(flag).trim() === '本社'
+    if (!email) return
+    if (!isShaain && !(includeCorporate && isCorporate)) return
     GmailApp.sendEmail(email, subject, body)
     Logger.log(`メール送信: ${email}`)
   })
