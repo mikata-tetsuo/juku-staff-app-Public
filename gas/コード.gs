@@ -193,6 +193,7 @@ function doGet(e) {
   if (action === 'getRateTable')      return jsonResponse(getRateTable(e.parameter.staffId))
   if (action === 'getStaffList')      return jsonResponse(getStaffList(e.parameter.adminLineUserId))
   if (action === 'getAdminWorkEntry') return jsonResponse(getAdminWorkEntry(e.parameter))
+  if (action === 'getMyErrors')       return jsonResponse(getMyErrors(e.parameter.staffId))
   return jsonResponse({ error: '不明なアクション' })
 }
 
@@ -205,6 +206,7 @@ function doPost(e) {
     if (action === 'updateItemStatus')   return jsonResponse(updateItemStatus(data))
     if (action === 'requestRegistration') return jsonResponse(saveRegistrationRequest(data))
     if (action === 'saveAdminWorkEntry') return jsonResponse(saveAdminWorkEntry(data))
+    if (action === 'saveClockReason')    return jsonResponse(saveClockReason(data))
     return jsonResponse({ error: '不明なアクション' })
   } catch (err) {
     return jsonResponse({ error: err.message })
@@ -285,7 +287,8 @@ function normalizeAdminValue(value) {
 
 function getAdminWorkEntry({ adminLineUserId, staffId, date }) {
   const admin = getStaffByLineId(adminLineUserId)
-  if (!admin || !admin.isAdmin) return { error: '管理者権限がありません', lessons: [] }
+  const isSelf = admin && String(admin.staffId) === String(staffId)
+  if (!admin || (!admin.isAdmin && !isSelf)) return { error: '権限がありません', lessons: [] }
   if (!staffId || !date) return { lessons: [] }
 
   const clockRows = getSheet(SHEET.CLOCK).getDataRange().getValues()
@@ -330,7 +333,8 @@ function getAdminWorkEntry({ adminLineUserId, staffId, date }) {
 
 function saveAdminWorkEntry({ adminLineUserId, adminName, staffId, name, date, clockInTime, clockOutTime, commuteLabel, commuteAllowance, lessons, V }) {
   const admin = getStaffByLineId(adminLineUserId)
-  if (!admin || !admin.isAdmin) return { error: '管理者権限がありません' }
+  const isSelf = admin && String(admin.staffId) === String(staffId)
+  if (!admin || (!admin.isAdmin && !isSelf)) return { error: '権限がありません' }
   if (!staffId || !name || !date) return { error: '必要な情報が不足しています' }
 
   const lock = LockService.getScriptLock()
@@ -390,6 +394,102 @@ function replaceAdminReportRows(staffId, name, date, lessons, clockInTime, clock
       clockInTime || '', clockOutTime || '', V || '',
     ])
   })
+}
+
+// ============================================================
+//  自分のZエラー・退室未打刻を取得（講師本人用）
+// ============================================================
+
+function getMyErrors(staffId) {
+  if (!staffId) return { errors: [] }
+
+  const today    = new Date()
+  const cutoff   = new Date(today.getTime() - 30 * 86400000)  // 過去30日
+  const cutoffStr = formatDate(cutoff)
+  const fmtTime  = t => t instanceof Date ? Utilities.formatDate(t, 'Asia/Tokyo', 'HH:mm') : String(t)
+
+  // 打刻ログから自分のデータだけ抽出
+  const clockMap = {}
+  getSheet(SHEET.CLOCK).getDataRange().getValues().slice(1).forEach(row => {
+    const [, sid,, type, dateRaw, timeRaw,,,,, reason] = row
+    if (String(sid) !== String(staffId)) return
+    const date = dateRaw instanceof Date ? formatDate(dateRaw) : String(dateRaw)
+    if (date < cutoffStr) return
+    if (!clockMap[date]) clockMap[date] = {}
+    const time = fmtTime(timeRaw)
+    if (type === '出勤') {
+      clockMap[date].in = time
+    } else {
+      clockMap[date].out    = time
+      clockMap[date].reason = reason || ''
+    }
+  })
+
+  // 勤務記録ログからV値を抽出
+  const vMap = {}
+  getSheet(SHEET.RECORD).getDataRange().getValues().slice(1).forEach(row => {
+    const [, sid,, dateRaw,,,,,,,, V] = row
+    if (String(sid) !== String(staffId)) return
+    const date = dateRaw instanceof Date ? formatDate(dateRaw) : String(dateRaw)
+    if (date < cutoffStr) return
+    vMap[date] = parseFloat(V) || 0
+  })
+
+  const yesterday = formatDate(new Date(today.getTime() - 86400000))
+  const errors    = []
+
+  Object.entries(clockMap).forEach(([date, clock]) => {
+    if (date > yesterday) return  // 当日はスキップ
+    const inTime  = clock.in  || ''
+    const outTime = clock.out || ''
+    const V        = vMap[date] || 0
+    const hasReason = !!(clock.reason)
+
+    // 退室未打刻
+    if (inTime && !outTime) {
+      errors.push({ date, type: 'MISSING_CHECKOUT', message: '退室打刻が記録されていません' })
+      return
+    }
+
+    // Z >= 1（滞在時間が記録より1時間以上多い）
+    if (inTime && outTime && V > 0 && !hasReason) {
+      const Y = calcHoursDiff(inTime, outTime)
+      const Z = Y - V
+      if (Z >= 1) {
+        const zh   = Math.floor(Z)
+        const zm   = Math.round((Z - zh) * 60)
+        const zStr = zm > 0 ? `${zh}時間${zm}分` : `${zh}時間`
+        errors.push({ date, type: 'Z_ERROR', inTime, outTime,
+          V: V.toFixed(2), Y: Y.toFixed(2), Z: Z.toFixed(2), zStr })
+      }
+    }
+  })
+
+  return { errors }
+}
+
+// ============================================================
+//  打刻ログの退室行に理由を保存（講師本人が入力）
+// ============================================================
+
+function saveClockReason({ staffId, date, reason }) {
+  if (!staffId || !date || !reason) return { error: '必要な情報が不足しています' }
+
+  const sheet = getSheet(SHEET.CLOCK)
+  const rows  = sheet.getDataRange().getValues()
+
+  for (let i = 1; i < rows.length; i++) {
+    const sid     = String(rows[i][1])
+    const type    = String(rows[i][3])
+    const dateRaw = rows[i][4]
+    const rowDate = dateRaw instanceof Date ? formatDate(dateRaw) : String(dateRaw)
+    if (sid === String(staffId) && rowDate === String(date) && type === '退勤') {
+      sheet.getRange(i + 1, 11).setValue(reason)  // K列（理由）
+      SpreadsheetApp.flush()
+      return { success: true }
+    }
+  }
+  return { success: false, error: '退室打刻が見つかりません' }
 }
 
 // ============================================================
@@ -1530,7 +1630,16 @@ function nightlyBatch() {
       // ただし打刻ログAB列（備考欄）に理由が記入されていればOK → エラー除外
       const hasReason = !!(clock.reason)
       if (V > 0 && !hasReason && (Z < -0.25 || Z >= 1)) {
-        zErrors.push({ name, date, V: V.toFixed(2), Y: Y.toFixed(2), Z: Z.toFixed(2) })
+        zErrors.push({ staffId, name, date, V: V.toFixed(2), Y: Y.toFixed(2), Z: Z.toFixed(2) })
+      }
+
+      // 退室未打刻チェック（入室あり・退室なし・前日以前のデータのみ）
+      // ※ バッチ実行時点でまだ在塾中の可能性がある当日はスキップ
+      const yesterday = new Date(today)
+      yesterday.setDate(yesterday.getDate() - 1)
+      const yestStr = formatDate(yesterday)
+      if (inTime && !outTime && date <= yestStr) {
+        zErrors.push({ staffId, name, date, V: (V || 0).toFixed(2), Y: '未退室', Z: '退室なし' })
       }
     }
   })
@@ -1555,11 +1664,14 @@ function nightlyBatch() {
     const subject = `【勤務記録チェック】${formatDate(today)} 異常${zErrors.length}件`
     const body = '以下の勤務記録に差異があります。\n\n' +
       zErrors.map(e =>
-        `・${e.name}　${e.date}\n　滞在 ${e.Y}h ／ 記録 ${e.V}h ／ 差 ${e.Z}h`
+        e.Z === '退室なし'
+          ? `・${e.name}　${e.date}\n　【退室未打刻】退室打刻が記録されていません`
+          : `・${e.name}　${e.date}\n　滞在 ${e.Y}h ／ 記録 ${e.V}h ／ 差 ${e.Z}h`
       ).join('\n') +
       '\n\n必要に応じて担当講師に確認をお願いします。'
     sendAdminMail(subject, body)
     writeErrorsToFirestore(zErrors)
+    sendLineErrorNotifications(zErrors)
   }
 
   // ── Z異常行をログにハイライト ──
@@ -2241,25 +2353,29 @@ function writeErrorsToFirestore(zErrors) {
   const url       = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/errors`
 
   zErrors.forEach(e => {
-    const detail = `滞在 ${e.Y}h ／ 記録 ${e.V}h ／ 差 ${e.Z}h`
+    const isMissingOut = e.Z === '退室なし'
+    const detail = isMissingOut
+      ? `退室打刻なし（入室 ${e.Y === '未退室' ? '記録あり' : e.Y}）`
+      : `滞在 ${e.Y}h ／ 記録 ${e.V}h ／ 差 ${e.Z}h`
     const payload = JSON.stringify({
       fields: {
         staffId:   { stringValue: e.staffId || '' },
         name:      { stringValue: e.name },
         date:      { stringValue: e.date },
-        errorType: { stringValue: 'Z_ERROR' },
+        errorType: { stringValue: isMissingOut ? 'MISSING_CHECKOUT' : 'Z_ERROR' },
         detail:    { stringValue: detail },
         resolved:  { booleanValue: false },
         createdAt: { timestampValue: new Date().toISOString() },
       }
     })
     try {
-      UrlFetchApp.fetch(url, {
+      const res = UrlFetchApp.fetch(url, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         payload,
         muteHttpExceptions: true,
       })
+      Logger.log(`[Firestore] ${e.name} ${e.date} → ${res.getResponseCode()} ${res.getContentText()}`)
     } catch(err) {
       Logger.log(`[Firestore] エラー書き込み失敗: ${err}`)
     }
@@ -2485,12 +2601,29 @@ function eveningReminder() {
   Logger.log(`22:30リマインド送信: ${count}件`)
 }
 
+// Zエラーを該当講師にLINE push通知
+function sendLineErrorNotifications(zErrors) {
+  const lineIdMap = {}
+  getSheet(SHEET.MASTER).getDataRange().getValues().slice(1).forEach(r => {
+    if (r[2] && r[0]) lineIdMap[String(r[2])] = String(r[0])
+  })
+  zErrors.forEach(e => {
+    const lineUserId = lineIdMap[e.name]
+    if (!lineUserId) { Logger.log(`LINE ID未設定スキップ: ${e.name}`); return }
+    const msg = e.Z === '退室なし'
+      ? `【退室未打刻】\n${e.date} の退室打刻が記録されていません。\n\nアプリを開いて退室打刻と勤務記録を入力してください。`
+      : `【勤務記録エラー】\n${e.date} の勤務記録に確認が必要です。\n\n滞在 ${e.Y}h ／ 記録 ${e.V}h ／ 差 ${e.Z}h\n\nアプリを開いて確認・修正してください。`
+    sendLinePush(lineUserId, msg)
+  })
+  Logger.log(`Zエラー通知送信: ${zErrors.length}件`)
+}
+
 // LINE push通知送信
 function sendLinePush(lineUserId, message) {
   const token = PropertiesService.getScriptProperties().getProperty('LINE_CHANNEL_TOKEN')
   if (!token) { Logger.log('LINEチャンネルトークン未設定'); return }
 
-  UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
+  const res = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
     method  : 'post',
     headers : {
       'Content-Type' : 'application/json',
@@ -2500,8 +2633,14 @@ function sendLinePush(lineUserId, message) {
       to      : lineUserId,
       messages: [{ type: 'text', text: message }],
     }),
+    muteHttpExceptions: true,
   })
-  Logger.log(`LINE push送信: ${lineUserId}`)
+  const code = res.getResponseCode()
+  if (code !== 200) {
+    Logger.log(`LINE push失敗 (${code}): ${res.getContentText()}`)
+  } else {
+    Logger.log(`LINE push送信: ${lineUserId}`)
+  }
 }
 
 // LINEチャンネルアクセストークンを登録（メニューから実行）

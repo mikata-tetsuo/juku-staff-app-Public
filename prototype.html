@@ -128,6 +128,30 @@
     </div>
 
     <div class="flex-1 overflow-y-auto px-4 py-4 space-y-3 pb-32">
+
+      <!-- 勤務エラーバナー（Zエラー・退室未打刻） -->
+      <div id="my-errors-section" class="hidden space-y-2"></div>
+
+      <!-- 理由入力モーダル -->
+      <div id="reason-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-end">
+        <div class="bg-white rounded-t-2xl w-full p-5 space-y-4">
+          <p class="font-bold text-gray-800">📝 理由を登録する</p>
+          <p id="reason-modal-date" class="text-sm text-gray-500"></p>
+          <div class="grid grid-cols-2 gap-2">
+            <button class="reason-preset-btn border border-gray-200 rounded-xl py-2 text-sm text-gray-700 active:bg-gray-100" data-text="休憩">🍵 休憩</button>
+            <button class="reason-preset-btn border border-gray-200 rounded-xl py-2 text-sm text-gray-700 active:bg-gray-100" data-text="授業準備・後片付け">📚 授業準備</button>
+            <button class="reason-preset-btn border border-gray-200 rounded-xl py-2 text-sm text-gray-700 active:bg-gray-100" data-text="保護者対応">👨‍👩‍👧 保護者対応</button>
+            <button class="reason-preset-btn border border-gray-200 rounded-xl py-2 text-sm text-gray-700 active:bg-gray-100" data-text="事務作業">📋 事務作業</button>
+          </div>
+          <input id="reason-input" type="text" placeholder="その他（直接入力）"
+            class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-line-green" />
+          <div class="flex gap-2">
+            <button onclick="closeReasonModal()" class="flex-1 py-3 border border-gray-200 rounded-xl text-sm text-gray-600">キャンセル</button>
+            <button onclick="submitClockReason()" class="flex-1 py-3 bg-line-green text-white font-bold rounded-xl text-sm">登録する</button>
+          </div>
+        </div>
+      </div>
+
       <!-- お知らせ・タスク 集約カード（常時表示、状態で見た目変化） -->
       <div id="home-urgent" class="bg-amber-50 border-2 border-amber-300 rounded-2xl shadow-sm p-3">
         <p class="text-sm font-bold text-gray-800 mb-2">
@@ -2100,12 +2124,13 @@
 
     async function proceedClockOutZCheck(now) {
       // ── Z（時間差）を計算：1h以上なら理由選択へ ──
-      if (state.clockInTime && state.pendingReport) {
+      // 社員はレポートなしのため対象外。pendingReport がなくても滞在時間で判定する。
+      if (state.clockInTime && !isShain()) {
         const [ih, im] = state.clockInTime.split(':').map(Number)
         const nowMins  = now.getHours() * 60 + now.getMinutes()
         const inMins   = ih * 60 + im
         const Y = (nowMins - inMins) / 60
-        const V = state.pendingReport.V || 0
+        const V = state.pendingReport?.V || 0
         const Z = Y - V
 
         if (DEV_MODE ? Z >= 0 : Z >= 1) {
@@ -2497,6 +2522,47 @@
       const V = calcV()
       if (V === 0) { alert('授業の内容を入力してください'); return }
 
+      // ── セルフ修正モード（Zエラーバナーから来た場合）──
+      if (state.selfCorrectMode) {
+        const { date, inTime, outTime } = state.selfCorrectMode
+        this.textContent = '送信中...'
+        this.disabled = true
+        try {
+          const lessons = collectLessons()
+          if (!DEV_MODE) {
+            await gasPost({
+              action          : 'saveAdminWorkEntry',
+              adminLineUserId : state.staff.lineUserId,
+              adminName       : state.staff.name,
+              staffId         : state.staff.staffId,
+              name            : state.staff.name,
+              date, clockInTime: inTime, clockOutTime: outTime,
+              commuteLabel: '', commuteAllowance: 0,
+              lessons, V,
+            })
+          }
+          // バナーから該当エラーカードを削除
+          const errorDate = date
+          const card = document.querySelector(`[data-error-date="${errorDate}"]`)
+          if (card) card.remove()
+          const section = document.getElementById('my-errors-section')
+          if (section && !section.querySelector('[data-error-date]') && !section.querySelector('.bg-red-50')) {
+            section.classList.add('hidden')
+          }
+          state.selfCorrectMode = null
+          state.clockInTime  = null
+          state.clockInDate  = null
+          renderHomeMode('before')
+          showScreen('home')
+          alert('✅ 勤務記録を修正しました')
+        } catch (e) {
+          this.textContent = '修正内容を送信する'
+          this.disabled = false
+          alert('送信に失敗しました。再度お試しください。')
+        }
+        return
+      }
+
       const now     = new Date()
       const clockIn = state.clockInDate || now
       const Y       = (now - clockIn) / 3600000
@@ -2664,6 +2730,107 @@
       }
     }
 
+    // ─── 勤務エラーチェック（Zエラー・退室未打刻） ───────────────────────────
+    let pendingReasonTarget = null  // { date, type } — 理由登録モーダルの対象
+
+    async function loadMyErrors() {
+      const section = document.getElementById('my-errors-section')
+      if (!state.staff?.staffId) return
+      try {
+        const data = DEV_MODE
+          ? { errors: [{ date: '2026-06-03', type: 'Z_ERROR', inTime: '19:47', outTime: '22:26', V: '0.00', Y: '2.65', Z: '2.65', zStr: '2時間39分' }] }
+          : await gasGet({ action: 'getMyErrors', staffId: state.staff.staffId })
+        const errors = data?.errors || []
+        if (errors.length === 0) { section.classList.add('hidden'); return }
+
+        section.innerHTML = errors.map(e => {
+          if (e.type === 'MISSING_CHECKOUT') {
+            return `
+              <div class="bg-red-50 border-2 border-red-300 rounded-2xl p-4 space-y-3">
+                <p class="text-sm font-bold text-red-700">🚨 退室打刻が記録されていません</p>
+                <p class="text-xs text-gray-600">${e.date}（退室ボタンが押されていません）</p>
+                <p class="text-xs text-gray-500">管理者に報告して入力を依頼してください。</p>
+              </div>`
+          }
+          // Z_ERROR
+          return `
+            <div class="bg-orange-50 border-2 border-orange-300 rounded-2xl p-4 space-y-3" data-error-date="${e.date}">
+              <p class="text-sm font-bold text-orange-700">⚠️ 勤務記録に確認が必要です</p>
+              <p class="text-xs text-gray-600">${e.date}　滞在時間が報告より <strong>${e.zStr}</strong> 長くなっています</p>
+              <p class="text-xs text-gray-500">入室 ${e.inTime} ／ 退室 ${e.outTime} ／ 報告 ${e.V}h</p>
+              <div class="flex gap-2">
+                <button onclick="openReasonModal('${e.date}')"
+                  class="flex-1 py-2 bg-orange-500 text-white text-sm font-bold rounded-xl active:bg-orange-600">
+                  💬 理由を登録する
+                </button>
+                <button onclick="openSelfCorrect('${e.date}', '${e.inTime}', '${e.outTime}')"
+                  class="flex-1 py-2 border-2 border-orange-300 text-orange-700 text-sm font-bold rounded-xl active:bg-orange-50">
+                  ✏️ 勤務記録を修正
+                </button>
+              </div>
+            </div>`
+        }).join('')
+        section.classList.remove('hidden')
+      } catch (e) {
+        console.error('エラーチェック失敗:', e)
+      }
+    }
+
+    function openReasonModal(date) {
+      pendingReasonTarget = { date }
+      document.getElementById('reason-modal-date').textContent = `対象日: ${date}`
+      document.getElementById('reason-input').value = ''
+      document.getElementById('reason-modal').classList.remove('hidden')
+    }
+
+    function closeReasonModal() {
+      pendingReasonTarget = null
+      document.getElementById('reason-modal').classList.add('hidden')
+    }
+
+    document.querySelectorAll('.reason-preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.getElementById('reason-input').value = btn.dataset.text
+      })
+    })
+
+    async function submitClockReason() {
+      const reason = document.getElementById('reason-input').value.trim()
+      if (!reason) { alert('理由を入力してください'); return }
+      if (!pendingReasonTarget) return
+      const { date } = pendingReasonTarget
+      try {
+        if (!DEV_MODE) {
+          await gasPost({ action: 'saveClockReason', staffId: state.staff.staffId, date, reason })
+        }
+        closeReasonModal()
+        // バナーから該当エラーを削除
+        const card = document.querySelector(`[data-error-date="${date}"]`)
+        if (card) card.remove()
+        const section = document.getElementById('my-errors-section')
+        if (!section.querySelector('[data-error-date]') && !section.querySelector('.bg-red-50')) {
+          section.classList.add('hidden')
+        }
+      } catch (e) {
+        alert('登録に失敗しました。再度お試しください。')
+      }
+    }
+
+    function openSelfCorrect(date, inTime, outTime) {
+      // 既存のreportフォームをセルフ修正モードで開く
+      state.selfCorrectMode = { date, inTime, outTime }
+      state.clockInTime  = inTime
+      state.clockInDate  = new Date(`${date}T${inTime}:00`)
+      state.pendingReport = null
+      clearLessons()
+      addLesson()
+      document.getElementById('report-header-info').textContent =
+        `${date} ${inTime} 入室（修正モード）`
+      document.getElementById('btn-submit-report').textContent = '修正内容を送信する'
+      document.getElementById('z-check-msg').classList.add('hidden')
+      showScreen('report')
+    }
+
     // ─── Init ────────────────────────────────────────────────────────────────
     async function init() {
       setInterval(updateClock, 1000)
@@ -2681,6 +2848,7 @@
         renderGradeBadge(state.staff.grade)
         renderCommuteOptions(state.staff.commutes)
         loadNotices()
+        loadMyErrors()        // 未解決のZエラー・退室未打刻をチェック（DEV_MODEはモックデータ）
         restoreFromSession()  // localStorage に入室中セッションがあれば復帰
         return
       }
@@ -2710,10 +2878,11 @@
 
         // state に講師情報をセット
         state.staff = {
-          staffId  : staff.staffId,
-          name     : staff.name,
-          grade    : staff.grade || '',
-          commutes : staff.commutes || [],
+          staffId    : staff.staffId,
+          lineUserId : lineUserId,
+          name       : staff.name,
+          grade      : staff.grade || '',
+          commutes   : staff.commutes || [],
         }
 
         document.getElementById('staff-name').textContent = staff.name + ' 先生'
@@ -2721,6 +2890,7 @@
         renderGradeBadge(staff.grade)
         renderCommuteOptions(staff.commutes || [])
         loadNotices()
+        loadMyErrors()        // 未解決のZエラー・退室未打刻をチェック
         restoreFromSession()  // localStorage に入室中セッションがあれば復帰
 
       } catch (err) {
