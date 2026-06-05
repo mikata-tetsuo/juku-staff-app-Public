@@ -2617,21 +2617,46 @@ function eveningReminder() {
   Logger.log(`22:30リマインド送信: ${count}件`)
 }
 
-// Zエラーを該当講師にLINE push通知
+// Zエラーを該当講師 + 社員管理者にLINE push通知
 function sendLineErrorNotifications(zErrors) {
+  // 講師マスタ：名前 → LINE ID のマップ
   const lineIdMap = {}
   getSheet(SHEET.MASTER).getDataRange().getValues().slice(1).forEach(r => {
     if (r[2] && r[0]) lineIdMap[String(r[2])] = String(r[0])
   })
+
+  // 管理者シートのTRUE行（社員）の LINE ID を取得（名前で講師マスタと照合）
+  const adminLineIds = []
+  getSheet(SHEET.ADMIN).getDataRange().getValues().slice(1).forEach(r => {
+    const flag = r[2]
+    const isShaain = flag === true || String(flag).trim().toUpperCase() === 'TRUE'
+    if (!isShaain) return
+    const adminName = String(r[0] || '').trim()
+    const lineId = lineIdMap[adminName]
+    if (lineId) adminLineIds.push(lineId)
+  })
+
   zErrors.forEach(e => {
-    const lineUserId = lineIdMap[e.name]
-    if (!lineUserId) { Logger.log(`LINE ID未設定スキップ: ${e.name}`); return }
+    const teacherLineId = lineIdMap[e.name]
     const msg = e.Z === '退室なし'
       ? `【退室未打刻】\n${e.date} の退室打刻が記録されていません。\n\nアプリを開いて退室打刻と勤務記録を入力してください。`
       : e.V === '0.00' && e.Z === e.Y
         ? `【勤務記録未提出】\n${e.date} の勤務記録が提出されていません（${e.Y}h滞在）。\n\nアプリを開いて勤務記録を入力してください。`
         : `【勤務記録エラー】\n${e.date} の勤務記録に確認が必要です。\n\n滞在 ${e.Y}h ／ 記録 ${e.V}h ／ 差 ${e.Z}h\n\nアプリを開いて確認・修正してください。`
-    sendLinePush(lineUserId, msg)
+    const adminMsg = `【管理者通知】${e.name} 先生\n` + msg
+
+    // 該当講師本人に送信
+    if (teacherLineId) {
+      sendLinePush(teacherLineId, msg)
+    } else {
+      Logger.log(`LINE ID未設定スキップ: ${e.name}`)
+    }
+
+    // 社員管理者全員に送信（本人と重複する場合はスキップ）
+    adminLineIds.forEach(adminId => {
+      if (adminId === teacherLineId) return  // 本人にはすでに送ったのでスキップ
+      sendLinePush(adminId, adminMsg)
+    })
   })
   Logger.log(`Zエラー通知送信: ${zErrors.length}件`)
 }
