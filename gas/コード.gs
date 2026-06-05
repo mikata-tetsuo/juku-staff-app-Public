@@ -1633,6 +1633,12 @@ function nightlyBatch() {
         zErrors.push({ staffId, name, date, V: V.toFixed(2), Y: Y.toFixed(2), Z: Z.toFixed(2) })
       }
 
+      // 勤務記録なし・長時間滞在チェック（社員除く）
+      // 入室・退室はあるが勤務記録が未提出で Y >= 1h の場合
+      if (!isSocial && V === 0 && inTime && outTime && !hasReason && Y >= 1) {
+        zErrors.push({ staffId, name, date, V: '0.00', Y: Y.toFixed(2), Z: Y.toFixed(2) })
+      }
+
       // 退室未打刻チェック（入室あり・退室なし・前日以前のデータのみ）
       // ※ バッチ実行時点でまだ在塾中の可能性がある当日はスキップ
       const yesterday = new Date(today)
@@ -1666,7 +1672,9 @@ function nightlyBatch() {
       zErrors.map(e =>
         e.Z === '退室なし'
           ? `・${e.name}　${e.date}\n　【退室未打刻】退室打刻が記録されていません`
-          : `・${e.name}　${e.date}\n　滞在 ${e.Y}h ／ 記録 ${e.V}h ／ 差 ${e.Z}h`
+          : e.V === '0.00' && e.Z === e.Y
+            ? `・${e.name}　${e.date}\n　【勤務記録未提出】${e.Y}h滞在しているが勤務記録がありません`
+            : `・${e.name}　${e.date}\n　滞在 ${e.Y}h ／ 記録 ${e.V}h ／ 差 ${e.Z}h`
       ).join('\n') +
       '\n\n必要に応じて担当講師に確認をお願いします。'
     sendAdminMail(subject, body)
@@ -2353,16 +2361,20 @@ function writeErrorsToFirestore(zErrors) {
   const url       = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/errors`
 
   zErrors.forEach(e => {
-    const isMissingOut = e.Z === '退室なし'
+    const isMissingOut   = e.Z === '退室なし'
+    const isMissingReport = e.V === '0.00' && e.Z === e.Y
     const detail = isMissingOut
       ? `退室打刻なし（入室 ${e.Y === '未退室' ? '記録あり' : e.Y}）`
-      : `滞在 ${e.Y}h ／ 記録 ${e.V}h ／ 差 ${e.Z}h`
+      : isMissingReport
+        ? `勤務記録未提出（${e.Y}h滞在）`
+        : `滞在 ${e.Y}h ／ 記録 ${e.V}h ／ 差 ${e.Z}h`
+    const errorType = isMissingOut ? 'MISSING_CHECKOUT' : isMissingReport ? 'MISSING_REPORT' : 'Z_ERROR'
     const payload = JSON.stringify({
       fields: {
         staffId:   { stringValue: e.staffId || '' },
         name:      { stringValue: e.name },
         date:      { stringValue: e.date },
-        errorType: { stringValue: isMissingOut ? 'MISSING_CHECKOUT' : 'Z_ERROR' },
+        errorType: { stringValue: errorType },
         detail:    { stringValue: detail },
         resolved:  { booleanValue: false },
         createdAt: { timestampValue: new Date().toISOString() },
@@ -2612,7 +2624,9 @@ function sendLineErrorNotifications(zErrors) {
     if (!lineUserId) { Logger.log(`LINE ID未設定スキップ: ${e.name}`); return }
     const msg = e.Z === '退室なし'
       ? `【退室未打刻】\n${e.date} の退室打刻が記録されていません。\n\nアプリを開いて退室打刻と勤務記録を入力してください。`
-      : `【勤務記録エラー】\n${e.date} の勤務記録に確認が必要です。\n\n滞在 ${e.Y}h ／ 記録 ${e.V}h ／ 差 ${e.Z}h\n\nアプリを開いて確認・修正してください。`
+      : e.V === '0.00' && e.Z === e.Y
+        ? `【勤務記録未提出】\n${e.date} の勤務記録が提出されていません（${e.Y}h滞在）。\n\nアプリを開いて勤務記録を入力してください。`
+        : `【勤務記録エラー】\n${e.date} の勤務記録に確認が必要です。\n\n滞在 ${e.Y}h ／ 記録 ${e.V}h ／ 差 ${e.Z}h\n\nアプリを開いて確認・修正してください。`
     sendLinePush(lineUserId, msg)
   })
   Logger.log(`Zエラー通知送信: ${zErrors.length}件`)
